@@ -66,15 +66,14 @@ main() {
 
   case "$PLATFORM" in
     "osx")
-      _install brew qt5
-      brew link qt5 --force || true
+      _install brew qt@6
+      brew link qt@6 --force || true
       ;;
     "termux")
-      _install x11-repo qt5-qtbase
+      _install x11-repo qt6-qtbase
       ;;
     "linux")
-      _install build-essential qtbase5-dev qt5-qmake qtbase5-dev-tools
-      _install qt6-base-dev qmake6 qt6-base-dev-tools
+      _install build-essential qt6-base-dev qt6-base-dev-tools libqt6core6 libqt6network6 libqt6sql6 libqt6xml6
       ;;
    esac
 }

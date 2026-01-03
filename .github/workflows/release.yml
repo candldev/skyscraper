@@ -1,0 +1,239 @@
+name: Release Builds
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Get version from tag
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Create source archive
+        run: |
+          git archive --format=zip --prefix=skyscraper-${{ steps.get_version.outputs.version }}/ HEAD > skyscraper-${{ steps.get_version.outputs.version }}-source.zip
+          git archive --format=tar.gz --prefix=skyscraper-${{ steps.get_version.outputs.version }}/ HEAD > skyscraper-${{ steps.get_version.outputs.version }}-source.tar.gz
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            skyscraper-${{ steps.get_version.outputs.version }}-source.zip
+            skyscraper-${{ steps.get_version.outputs.version }}-source.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Install Qt6 and dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential qt6-base-dev libqt6core6 libqt6network6 libqt6sql6 libqt6xml6 qt6-base-dev-tools
+      
+      - name: Build Skyscraper
+        run: |
+          qmake6
+          make -j$(nproc)
+      
+      - name: Create binary package
+        run: |
+          mkdir -p package/usr/local/bin
+          mkdir -p package/usr/local/etc/skyscraper
+          mkdir -p package/usr/local/etc/skyscraper/cache
+          mkdir -p package/usr/local/etc/skyscraper/import
+          mkdir -p package/usr/local/etc/skyscraper/resources
+          
+          cp Skyscraper package/usr/local/bin/
+          cp aliasMap.csv hints.xml mameMap.csv package/usr/local/etc/skyscraper/
+          cp mobygames_platforms.json peas.json platforms_idmap.csv package/usr/local/etc/skyscraper/
+          cp screenscraper_platforms.json tgdb_*.json package/usr/local/etc/skyscraper/
+          cp config.ini.example README.md artwork.xml* batocera-artwork.xml package/usr/local/etc/skyscraper/
+          cp cache/priorities.xml.example package/usr/local/etc/skyscraper/cache/
+          cp import/definitions.dat.example* package/usr/local/etc/skyscraper/import/
+          cp resources/*.png package/usr/local/etc/skyscraper/resources/ 2>/dev/null || true
+          
+          cd package
+          tar -czf ../skyscraper-${{ needs.create-release.outputs.version }}-linux-x86_64.tar.gz *
+      
+      - name: Upload Linux binary
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          files: skyscraper-${{ needs.create-release.outputs.version }}-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: create-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Install Qt6
+        run: |
+          brew install qt@6
+          echo "$(brew --prefix qt@6)/bin" >> $GITHUB_PATH
+      
+      - name: Build Skyscraper
+        run: |
+          qmake
+          make -j$(sysctl -n hw.ncpu)
+      
+      - name: Create binary package
+        run: |
+          mkdir -p package/usr/local/bin
+          mkdir -p package/usr/local/etc/skyscraper
+          mkdir -p package/usr/local/etc/skyscraper/cache
+          mkdir -p package/usr/local/etc/skyscraper/import
+          mkdir -p package/usr/local/etc/skyscraper/resources
+          
+          # Copy binary (macOS creates .app bundle)
+          if [ -f Skyscraper ]; then
+            cp Skyscraper package/usr/local/bin/
+          elif [ -f Skyscraper.app/Contents/MacOS/Skyscraper ]; then
+            cp Skyscraper.app/Contents/MacOS/Skyscraper package/usr/local/bin/
+          fi
+          
+          cp aliasMap.csv hints.xml mameMap.csv package/usr/local/etc/skyscraper/
+          cp mobygames_platforms.json peas.json platforms_idmap.csv package/usr/local/etc/skyscraper/
+          cp screenscraper_platforms.json tgdb_*.json package/usr/local/etc/skyscraper/
+          cp config.ini.example README.md artwork.xml* batocera-artwork.xml package/usr/local/etc/skyscraper/
+          cp cache/priorities.xml.example package/usr/local/etc/skyscraper/cache/
+          cp import/definitions.dat.example* package/usr/local/etc/skyscraper/import/
+          cp resources/*.png package/usr/local/etc/skyscraper/resources/ 2>/dev/null || true
+          
+          cd package
+          tar -czf ../skyscraper-${{ needs.create-release.outputs.version }}-macos-x86_64.tar.gz *
+      
+      - name: Upload macOS binary
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          files: skyscraper-${{ needs.create-release.outputs.version }}-macos-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: Build Windows x86_64
+    runs-on: windows-latest
+    needs: create-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: '6.8.0'
+          arch: 'win64_mingw'
+          tools: 'tools_mingw90'
+          cache: true
+      
+      - name: Setup MinGW
+        run: |
+          echo "${{ runner.temp }}/Qt/Tools/mingw1120_64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      
+      - name: Build Skyscraper
+        run: |
+          qmake
+          mingw32-make -j4
+      
+      - name: Deploy Qt dependencies
+        run: |
+          windeployqt6 --no-system-dxc-compiler --no-system-d3d-compiler --no-opengl-sw release/Skyscraper.exe
+      
+      - name: Copy licenses and config files
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE release/LICENSE.Skyscraper
+          
+          # Create config directory structure
+          New-Item -ItemType Directory -Force -Path release/config/cache
+          New-Item -ItemType Directory -Force -Path release/config/import
+          New-Item -ItemType Directory -Force -Path release/config/resources
+          
+          Copy-Item aliasMap.csv, hints.xml, mameMap.csv release/config/
+          Copy-Item mobygames_platforms.json, peas.json, platforms_idmap.csv release/config/
+          Copy-Item screenscraper_platforms.json, tgdb_*.json release/config/
+          Copy-Item config.ini.example, README.md, artwork.xml* release/config/
+          Copy-Item batocera-artwork.xml release/config/
+          Copy-Item cache/priorities.xml.example release/config/cache/
+          Copy-Item import/definitions.dat.example* release/config/import/
+          Get-ChildItem resources/*.png -ErrorAction SilentlyContinue | Copy-Item -Destination release/config/resources/
+      
+      - name: Create Windows package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path release/* -DestinationPath skyscraper-${{ needs.create-release.outputs.version }}-windows-x86_64.zip
+      
+      - name: Upload Windows binary
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          files: skyscraper-${{ needs.create-release.outputs.version }}-windows-x86_64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-android:
+    name: Build Android ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            target: android-aarch64
+          - arch: arm
+            target: android-arm
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      
+      - name: Setup Termux build environment
+        run: bash ./supplementary/workflows/deps "${{ matrix.target }}"
+      
+      - name: Build for Android
+        run: bash ./supplementary/workflows/install "${{ matrix.target }}"
+      
+      - name: Test binary
+        run: bash ./supplementary/workflows/test "${{ matrix.target }}"
+      
+      - name: Create package
+        run: |
+          mkdir -p package
+          cp target/Skyscraper package/
+          cd package
+          tar -czf ../skyscraper-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz Skyscraper
+      
+      - name: Upload Android binary
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          files: skyscraper-${{ needs.create-release.outputs.version }}-${{ matrix.target }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
