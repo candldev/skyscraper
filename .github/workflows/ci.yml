@@ -7,9 +7,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@master
-      - name: Install deps
-        run: bash ./supplementary/workflows/deps
+        uses: actions/checkout@v4
+      - name: Install Qt6 and dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential qt6-base-dev libqt6core6 libqt6network6 libqt6sql6 libqt6xml6 qt6-base-dev-tools
       - name: Build
         run: bash ./supplementary/workflows/install
       - name: Test
