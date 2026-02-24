@@ -34,12 +34,15 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QStringBuilder>
+
+static const QRegularExpression RE_THE = QRegularExpression(", [Tt]he");
 
 AbstractScraper::AbstractScraper(Settings *config,
                                  QSharedPointer<NetManager> manager,
-                                 MatchType type)
+                                 MatchType type, int timeout)
     : config(config), type(type) {
-    netComm = new NetComm(manager);
+    netComm = new NetComm(manager, timeout);
     connect(netComm, &NetComm::dataReady, &q, &QEventLoop::quit);
 }
 
@@ -159,6 +162,11 @@ void AbstractScraper::populateGameEntry(GameEntry &game) {
         case GameEntry::Elem::FANART:
             if (config->fanart) {
                 getFanart(game);
+            }
+            break;
+        case GameEntry::Elem::BACKCOVER:
+            if (config->backcovers) {
+                getBackcover(game);
             }
             break;
         default:;
@@ -445,8 +453,7 @@ QByteArray AbstractScraper::downloadMedia(const QString &url, bool isImage) {
     q.exec();
     QByteArray d;
     QImage img;
-    if (netComm->getError() == QNetworkReply::NoError &&
-        (!isImage || img.loadFromData(netComm->getData()))) {
+    if (netComm->ok() && (!isImage || img.loadFromData(netComm->getData()))) {
         d = netComm->getData();
     }
     return d;
@@ -595,7 +602,7 @@ QString AbstractScraper::getCompareTitle(const QFileInfo &info) {
     QRegularExpressionMatch match;
 
     // Always move ", The" to the beginning of the name
-    match = QRegularExpression(", [Tt]he").match(compareTitle);
+    match = RE_THE.match(compareTitle);
     if (match.hasMatch()) {
         compareTitle = compareTitle.replace(match.captured(0), "")
                            .prepend(match.captured(0).right(3) + " ");
@@ -667,11 +674,11 @@ void AbstractScraper::runPasses(QList<GameEntry> &gameEntries,
 
     int pass = 0;
     for (const auto &sn : searchNames) {
-        output.append("\033[1;35mPass " + QString::number(++pass) + "\033[0m ");
+        output.append("\033[1;35mPass " % QString::number(++pass) % "\033[0m ");
         getSearchResults(gameEntries, sn, config->platform);
         if (config->verbosity >= 3) {
-            debug.append("Tried with: '" + sn + "'\n");
-            debug.append("Platform  : " + config->platform + "\n");
+            debug.append("Tried with: '" % sn % "'\n");
+            debug.append("Platform  : " % config->platform % "\n");
             QStringList candidates;
             for (auto const &ge : gameEntries) {
                 QString c = ge.title;
@@ -681,7 +688,7 @@ void AbstractScraper::runPasses(QList<GameEntry> &gameEntries,
                 if (!ge.publisher.isEmpty())
                     extra.append(ge.publisher);
                 if (!extra.isEmpty())
-                    c = c + " (" + extra.join(", ") + ")";
+                    c = c % " (" % extra.join(", ") % ")";
 
                 candidates.append(c);
             }
@@ -689,8 +696,9 @@ void AbstractScraper::runPasses(QList<GameEntry> &gameEntries,
                 candidates.sort(Qt::CaseInsensitive);
                 QString pad1 = candidates.length() > 3 ? "\n  " : "";
                 QString pad2 = candidates.length() > 3 ? "\n  " : ", ";
-                debug.append(QString("Candidates: ") + pad1 +
-                             candidates.join(pad2) + "\n");
+                debug.append(QString("Candidate%1: ")
+                                 .arg(candidates.length() == 1 ? " " : "s") %
+                             pad1 % candidates.join(pad2) % "\n");
             }
         }
         if (!gameEntries.isEmpty()) {
@@ -725,16 +733,32 @@ QVector<int> AbstractScraper::getPlatformId(const QString) {
 QVariantMap AbstractScraper::readJson(const QString &filename) {
     QVariantMap m;
     QFile jsonFile(filename);
-    if (jsonFile.open(QIODevice::ReadOnly)) {
-        QJsonObject jsonObj =
-            QJsonDocument::fromJson(jsonFile.readAll()).object();
-        m = jsonObj.toVariantMap();
-        jsonFile.close();
-    } else {
-        printf("\033[1;31mFile '%s' not found. Please fix.\n\nNow "
-               "quitting...\033[0m\n",
+    QJsonObject jsonObj;
+    bool canRead = jsonFile.open(QIODevice::ReadOnly);
+    if (canRead) {
+        jsonObj = QJsonDocument::fromJson(jsonFile.readAll()).object();
+        if (!jsonObj.isEmpty()) {
+            m = jsonObj.toVariantMap();
+            jsonFile.close();
+        }
+    }
+    if (!canRead) {
+        printf("\033[1;31mFile '%s' not found or not readable. Please "
+               "fix.\nNot scraping...\n\033[0m",
                filename.toUtf8().constData());
-        exit(1);
+    } else if (jsonObj.isEmpty()) {
+        printf("\033[1;31mFile '%s' has invalid JSON format. Please fix.\nNot "
+               "scraping...\n\033[0m",
+               filename.toUtf8().constData());
     }
     return m;
+}
+
+void AbstractScraper::bury(const int &returnCode, const QString &effect,
+                           const QString &cause) {
+    if (config->stdErr) {
+        fprintf(stderr, "Skyscraper: %s: %s\n", effect.toStdString().c_str(),
+                cause.toStdString().c_str());
+    }
+    exit(returnCode);
 }

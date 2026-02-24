@@ -3,7 +3,7 @@
  *
  *  Mon Dec 17 08:00:00 CEST 2018
  *  Copyright 2018 Lars Muldjord & Martin Gerhardy
- *  muldjordlars@gmail.com
+ *  Copyright 2025 Gemba @ GitHub
  ****************************************************************************/
 /*
  *  This file is part of skyscraper.
@@ -25,19 +25,15 @@
 
 #include "esgamelist.h"
 
+#include "gameentry.h"
 #include "nametools.h"
+#include "pathtools.h"
 
 ESGameList::ESGameList(Settings *config, QSharedPointer<NetManager> manager)
     : AbstractScraper(config, manager, MatchType::MATCH_ONE) {
-    baseUrl = config->gameListFolder +
-              (config->gameListFolder.right(1) != "/" ? "/" : "");
-    QString gameListXml = baseUrl + "gamelist.xml";
-    if (!QFileInfo::exists(gameListXml)) {
-        baseUrl = "import/" + config->platform + "/";
-        gameListXml = baseUrl + "gamelist.xml";
-    }
     QDomDocument xmlDoc;
-    QFile gameListFile(gameListXml);
+    QFile gameListFile(PathTools::concatPath(config->gameListFolder,
+                                             config->gameListFilename));
     if (gameListFile.open(QIODevice::ReadOnly)) {
         xmlDoc.setContent(&gameListFile);
         gameListFile.close();
@@ -47,8 +43,24 @@ ESGameList::ESGameList(Settings *config, QSharedPointer<NetManager> manager)
 
 void ESGameList::getSearchResults(QList<GameEntry> &gameEntries,
                                   QString searchName, QString platform) {
-    if (games.isEmpty())
+    if (games.isEmpty()) {
+        if (!gameListFile.exists()) {
+            printf(
+                "\033[1;31mGamelist file '%s' not found for platform '%s'. Now "
+                "quitting...\033[0m\n",
+                config->gameListFilename.toStdString().c_str(),
+                config->platform.toStdString().c_str());
+            emit die(1,
+                     QString("cannot access gamelist '%1' for platform '%2'")
+                         .arg(config->gameListFilename)
+                         .arg(config->platform),
+                     "File does not exist");
+        }
+        printf("\033[1;33mGamelist file is empty '%s'. Continuing "
+               "anyway.\033[0m\n",
+               gameListFile.fileName().toStdString().c_str());
         return;
+    }
 
     gameNode.clear();
 
@@ -58,7 +70,7 @@ void ESGameList::getSearchResults(QList<GameEntry> &gameEntries,
         if (info.fileName() == searchName) {
             gameNode = games.item(i);
             GameEntry game;
-            game.title = gameNode.firstChildElement("name").text();
+            game.title = getElementText(GameEntry::Elem::TITLE);
             game.platform = platform;
             gameEntries.append(game);
             break;
@@ -66,48 +78,67 @@ void ESGameList::getSearchResults(QList<GameEntry> &gameEntries,
     }
 }
 
+QString ESGameList::getElementText(GameEntry::Elem key) {
+    return gameNode.firstChildElement(GameEntry::getTag(key)).text();
+}
+
 void ESGameList::getGameData(GameEntry &game) {
     if (gameNode.isNull())
         return;
 
-    game.releaseDate = gameNode.firstChildElement("releasedate").text();
-    game.publisher = gameNode.firstChildElement("publisher").text();
-    game.developer = gameNode.firstChildElement("developer").text();
-    game.players = gameNode.firstChildElement("players").text();
-    game.rating = gameNode.firstChildElement("rating").text();
-    game.tags = gameNode.firstChildElement("genre").text();
-    game.description = gameNode.firstChildElement("desc").text();
-    if (config->cacheMarquees) {
-        game.marqueeData =
-            loadBinaryData(gameNode.firstChildElement("marquee").text());
+    game.releaseDate = getElementText(GameEntry::Elem::RELEASEDATE);
+    game.publisher = getElementText(GameEntry::Elem::PUBLISHER);
+    game.developer = getElementText(GameEntry::Elem::DEVELOPER);
+    game.players = getElementText(GameEntry::Elem::PLAYERS);
+    game.rating = getElementText(GameEntry::Elem::RATING);
+    game.tags = getElementText(GameEntry::Elem::TAGS);
+    game.description = getElementText(GameEntry::Elem::DESCRIPTION);
+    if (game.description.endsWith("[...]")) {
+        qWarning()
+            << QString(
+                   "Game title '%1' has shortened description '[...]' at %2 "
+                   "chars. Consider using a different source than esgamelist "
+                   "when the current maxLength setting is higher than %2.")
+                   .arg(game.title)
+                   .arg(game.description.length());
+    }
+    if (config->cacheWheels) {
+        // ES uses XML "marquee" but content is wheel (logo)
+        game.wheelData =
+            loadBinaryData(getElementText(GameEntry::Elem::MARQUEE));
     }
     if (config->cacheCovers) {
-        game.coverData =
-            loadBinaryData(gameNode.firstChildElement("thumbnail").text());
+        game.coverData = loadBinaryData(getElementText(GameEntry::Elem::COVER));
     }
     if (config->cacheScreenshots) {
         game.screenshotData =
-            loadBinaryData(gameNode.firstChildElement("image").text());
+            loadBinaryData(getElementText(GameEntry::Elem::SCREENSHOT));
     }
     if (config->manuals) {
         game.manualData =
-            loadBinaryData(gameNode.firstChildElement("manual").text());
-    }
-    if (config->videos) {
-        loadVideoData(game, gameNode.firstChildElement("video").text());
+            loadBinaryData(getElementText(GameEntry::Elem::MANUAL));
     }
     if (config->fanart) {
         game.fanartData =
-            loadBinaryData(gameNode.firstChildElement("fanart").text());
+            loadBinaryData(getElementText(GameEntry::Elem::FANART));
+    }
+    if (config->backcovers) {
+        game.backcoverData =
+            loadBinaryData(getElementText(GameEntry::Elem::BACKCOVER));
+    }
+    if (config->videos) {
+        loadVideoData(game, getElementText(GameEntry::Elem::VIDEO));
     }
 }
 
 QByteArray ESGameList::loadBinaryData(const QString fileName) {
-    QFile binFile(getAbsoluteFileName(fileName));
-    if (binFile.open(QIODevice::ReadOnly)) {
-        QByteArray data = binFile.readAll();
-        binFile.close();
-        return data;
+    if (!fileName.isEmpty()) {
+        QFile binFile(getAbsoluteFileName(fileName));
+        if (binFile.open(QIODevice::ReadOnly)) {
+            QByteArray data = binFile.readAll();
+            binFile.close();
+            return data;
+        }
     }
     return QByteArray();
 }
@@ -120,13 +151,12 @@ void ESGameList::loadVideoData(GameEntry &game, const QString fileName) {
 }
 
 QString ESGameList::getAbsoluteFileName(QString fileName) {
+    /* paths in gamelist are relative to inputFolder for ES */
+    fileName = PathTools::makeAbsolutePath(config->inputFolder, fileName);
     if (QFileInfo::exists(fileName)) {
-        return QFileInfo(fileName).absoluteFilePath();
+        return fileName;
     }
-    fileName.prepend(baseUrl);
-    if (QFileInfo::exists(fileName)) {
-        return QFileInfo(fileName).absoluteFilePath();
-    }
+    qDebug() << "file not found for" << config->inputFolder << fileName;
     return "";
 }
 

@@ -144,7 +144,7 @@ QString Platform::getFormats(QString platform, QString extensions,
     }
 
     // default extensions/formats for all
-    QSet<QString> formats({"*.zip", "*.7z", "*.ml"});
+    QSet<QString> formats({"*.zip", "*.7z", "*.ml", "*.m3u"});
     QStringList addExts;
 
 #if QT_VERSION >= 0x050e00
@@ -178,7 +178,7 @@ QStringList Platform::getAliases(QString platform) const {
     // Platform name itself is always appended as the first alias
     aliases.append(platform);
     aliases.append(peas[platform].toHash()["aliases"].toStringList());
-    qDebug() << "getAliases():" << aliases;
+    // qDebug() << "getAliases():" << aliases;
     return aliases;
 }
 
@@ -264,7 +264,8 @@ bool Platform::loadPlatformsIdMap() {
   Whereas user edits in such files should go into _local files (introduced with
   3.13).
 */
-bool Platform::isPlatformCfgfilePristine(const QString &cfgFilePath) {
+// 0: pristine, 1: local changes, -1 not readable, -2 non existing
+int Platform::isPlatformCfgfilePristine(const QString &cfgFilePath) {
     QMap<QString, QStringList> sha256sums = {
         // clang-format off
         {"peas.json", QStringList(
@@ -275,7 +276,9 @@ bool Platform::isPlatformCfgfilePristine(const QString &cfgFilePath) {
                  "f046b81f403b132379a4f93e3e5d9482e60b69ce3d18a13539a895ea2d6583d8",
                  "cdcd6abdfdb5b797df183feb03094908bb638f8b2038177769fb73f49caba7e9",
                  "f0dff220a6a07cf1272f00f94d5c55f69353cdce786f8dbfef029dbf30a48a7d",
-                 "6c648e3577992caef99c73a6e325a7e9580babf7eafc7ecf35eb349f9da594a1"}
+                 "6c648e3577992caef99c73a6e325a7e9580babf7eafc7ecf35eb349f9da594a1",
+                 "fcb923fa1b38441a462511b5b842705c284d91f560d5f30c0a45e68d2444facf",
+                 "fceca636224ec01e50e4d2ce47f43e2ab1d603c008f8292bf50808fcf7f708a3"}
             )
         },
         {"platforms_idmap.csv", QStringList(
@@ -283,31 +286,29 @@ bool Platform::isPlatformCfgfilePristine(const QString &cfgFilePath) {
                  "30c443a6a6c7583433e62e89febe8d10bae075040e5c1392623a71f348f3f476",
                  "bf12d0f2f7161d45041f8996c44d6c3c2f666cfc33938dbcbd506c1f766062c4",
                  "44a416856327c01c1ec73c41252f9c3318bf703c33fd717935f31b37e635f413",
-                 "9af2abea78af7b94b8c86d97417fb4aff347a8b6eef5c0fdab37be31938f5f9a"}
+                 "9af2abea78af7b94b8c86d97417fb4aff347a8b6eef5c0fdab37be31938f5f9a",
+                 "0c4a1cb2cde6c772c3125d59a1ae776a0cc05888520f131b3e058fbb91be00dd"}
             )
         }
         // clang-format on
     };
     QFileInfo cfgFileInfo = QFileInfo(cfgFilePath);
     if (!cfgFileInfo.exists()) {
-        return true;
+        return -2;
     }
 
     QCryptographicHash sha256 = QCryptographicHash(QCryptographicHash::Sha256);
     QFile cfgFile(cfgFilePath);
-    bool isPristine = false;
+    int isPristine = 1;
     if (cfgFile.open(QFile::ReadOnly)) {
         sha256.addData(cfgFile.readAll());
         QString currentSha256 = sha256.result().toHex();
         QString cfgBn = cfgFileInfo.fileName();
-        isPristine = sha256sums[cfgBn].contains(currentSha256);
+        isPristine = sha256sums[cfgBn].contains(currentSha256) ? 0 : 1;
         qDebug() << cfgFileInfo.absoluteFilePath() << currentSha256
-                 << "is pristine:" << isPristine;
+                 << "is pristine:" << (isPristine == 0);
     } else {
-        printf("\033[1;31mFile '%s' can not be read. Please fix. "
-               "Quitting.\033[0m\n",
-               cfgFilePath.toUtf8().constData());
-        exit(1);
+        isPristine = -1;
     }
     return isPristine;
 }
@@ -330,13 +331,3 @@ QVector<int> Platform::getPlatformIdOnScraper(const QString platform,
              << "and scraper" << scraper;
     return id;
 }
-
-// --- Console colors ---
-// Black        0;30     Dark Gray     1;30
-// Red          0;31     Light Red     1;31
-// Green        0;32     Light Green   1;32
-// Brown/Orange 0;33     Yellow        1;33
-// Blue         0;34     Light Blue    1;34
-// Purple       0;35     Light Purple  1;35
-// Cyan         0;36     Light Cyan    1;36
-// Light Gray   0;37     White         1;37

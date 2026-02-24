@@ -56,10 +56,11 @@ constexpr int UNDEF_YEAR = -1;
 
 ScraperWorker::ScraperWorker(QSharedPointer<Queue> queue,
                              QSharedPointer<Cache> cache,
+                             QSharedPointer<AbstractFrontend> frontend,
                              QSharedPointer<NetManager> manager,
                              Settings config, QString threadId)
-    : config(config), cache(cache), manager(manager), queue(queue),
-      threadId(threadId) {}
+    : config(config), cache(cache), frontend(frontend), manager(manager),
+      queue(queue), threadId(threadId) {}
 
 ScraperWorker::~ScraperWorker() {}
 
@@ -87,17 +88,13 @@ void ScraperWorker::run() {
     } else if (config.scraper == "import") {
         scraper = new ImportScraper(&config, manager);
     } else if (config.scraper == "gamebase") {
-        if (config.gameBaseFile.isEmpty()) {
-            printf("\033[0;31mBummer! No value for gameBaseFile parameter "
-                   "provided for [%s] in config.ini. Can't "
-                   "continue...\033[0m\n\n",
-                   config.platform.toStdString().c_str());
-            exit(1);
-        }
         scraper = new GamebaseScraper(&config, manager);
     } else {
         scraper = new AbstractScraper(&config, manager);
     }
+    // currently only ESGameList
+    QObject::connect(scraper, &AbstractScraper::die, scraper,
+                     &AbstractScraper::bury);
 
     if (config.platform == "amigacd32") {
         config.platform = "amiga";
@@ -217,15 +214,28 @@ void ScraperWorker::run() {
             game.found = false;
         } else {
             int compareYear = UNDEF_YEAR;
-            if (!config.ignoreYearInFilename) {
+            if (!cacheScraper && !config.ignoreYearInFilename) {
                 QString baseParNotes =
                     NameTools::getParNotes(info.completeBaseName());
                 // If baseParNotes matches (NNNN), compareYear = NNNN
+                if (baseParNotes.isEmpty()) {
+                    QString ignore;
+                    QString alias = scraper->lookupAliasMap(
+                        info.completeBaseName(), ignore);
+                    baseParNotes = NameTools::getParNotes(alias);
+                    if (baseParNotes.isEmpty()) {
+                        alias =
+                            scraper->lookupAliasMap(info.baseName(), ignore);
+                        baseParNotes = NameTools::getParNotes(alias);
+                    }
+                }
                 QRegularExpressionMatch match =
                     QRegularExpression("\\((\\d{4})\\)").match(baseParNotes);
                 if (match.hasMatch()) {
                     QString yyyy = match.captured(1);
                     compareYear = yyyy.toInt();
+                    qDebug() << "Got compare year from file/aliasMap:"
+                             << compareYear;
                 }
             }
             if (!config.searchName.isEmpty() && config.scraper == "gamebase") {
@@ -257,11 +267,11 @@ void ScraperWorker::run() {
             QString hint =
                 gameEntries.length() == 0
                     ? " :("
-                    : QString(", but %1 candidate%1: Use --verbosity 3 or "
+                    : QString(", but %1 candidate%2: Use --verbosity 3 or "
                               "--flags interactive or --query '...' or set an "
                               "alias (aliasMap.csv). =8^)")
-                          .arg(gameEntries.length() == 1 ? "" : "s")
-                          .arg(gameEntries.length());
+                          .arg(gameEntries.length())
+                          .arg(gameEntries.length() == 1 ? "" : "s");
             output.append(
                 QString("\033[1;33m---- Game '%1' not found%2 ----\033[0m\n\n")
                     .arg(info.completeBaseName())
@@ -312,22 +322,16 @@ void ScraperWorker::run() {
         }
 
         if (!config.pretend && cacheScraper) {
-            bool batoceraFe = config.frontend == "batocera";
-            bool esdeFe = config.frontend == "esde" && config.miximages;
-            // Process all artwork
-            compositor.saveAll(game, info.completeBaseName(), batoceraFe,
-                               esdeFe);
+            GameEntry::Types mediaSaved = GameEntry::NONE;
+            bool esdeMiximage = config.frontend == "esde" && config.miximages;
+            mediaSaved =
+                compositor.saveAll(game, info.completeBaseName(), esdeMiximage);
+            qDebug() << "mediaSaved" << mediaSaved;
             // extra media files (not part of compositor)
             const QString baseName = info.completeBaseName();
             const QString subPath = compositor.getSubpath(game.path);
-            // copy from cache to destination folder
-            copyMedia(MediaHint::VIDEO, baseName, subPath, game, batoceraFe);
-            copyMedia(MediaHint::MANUAL, baseName, subPath, game, batoceraFe);
-            copyMedia(MediaHint::FANART, baseName, subPath, game, batoceraFe);
-            if (esdeFe) {
-                copyMedia(MediaHint::SCREENSHOT, baseName, subPath, game,
-                          false);
-            }
+
+            frontend->copyMedia(mediaSaved, baseName, subPath, game);
         }
 
         // Add all resources to the cache
@@ -469,38 +473,47 @@ void ScraperWorker::run() {
                       "\033[0m' (" + game.ratingSrc + ")\n");
         output.append(
             "Cover:          " +
-            QString(
-                (game.coverData.isNull() ? "\033[1;31mNO" : "\033[1;32mYES")) +
+            QString((game.coverSrc.isEmpty() && game.coverData.isNull()
+                         ? "\033[1;31mNO"
+                         : "\033[1;32mYES")) +
             "\033[0m" +
             QString((config.cacheCovers || cacheScraper ? "" : " (uncached)")) +
             " (" + game.coverSrc + ")\n");
         output.append(
             "Screenshot:     " +
-            QString((game.screenshotData.isNull() ? "\033[1;31mNO"
-                                                  : "\033[1;32mYES")) +
+            QString(
+                (game.screenshotSrc.isEmpty() && game.screenshotData.isNull()
+                     ? "\033[1;31mNO"
+                     : "\033[1;32mYES")) +
             "\033[0m" +
             QString((config.cacheScreenshots || cacheScraper ? ""
                                                              : " (uncached)")) +
             " (" + game.screenshotSrc + ")\n");
+        // use wheelSrc here as wheel might be processed/used in marquee during
+        // gl creation avoid signaling NO to the user. wheeldata is set when
+        // found in scraping mode.
         output.append(
             "Wheel:          " +
-            QString(
-                (game.wheelData.isNull() ? "\033[1;31mNO" : "\033[1;32mYES")) +
+            QString((game.wheelSrc.isEmpty() && game.wheelData.isEmpty()
+                         ? "\033[1;31mNO"
+                         : "\033[1;32mYES")) +
             "\033[0m" +
             QString((config.cacheWheels || cacheScraper ? "" : " (uncached)")) +
             " (" + game.wheelSrc + ")\n");
         output.append(
             "Marquee:        " +
-            QString((game.marqueeData.isNull() ? "\033[1;31mNO"
-                                               : "\033[1;32mYES")) +
+            QString((game.marqueeSrc.isEmpty() && game.marqueeData.isNull()
+                         ? "\033[1;31mNO"
+                         : "\033[1;32mYES")) +
             "\033[0m" +
             QString(
                 (config.cacheMarquees || cacheScraper ? "" : " (uncached)")) +
             " (" + game.marqueeSrc + ")\n");
         output.append(
             "Texture:        " +
-            QString((game.textureData.isNull() ? "\033[1;31mNO"
-                                               : "\033[1;32mYES")) +
+            QString((game.textureSrc.isEmpty() && game.textureData.isNull()
+                         ? "\033[1;31mNO"
+                         : "\033[1;32mYES")) +
             "\033[0m" +
             QString(
                 (config.cacheTextures || cacheScraper ? "" : " (uncached)")) +
@@ -511,7 +524,7 @@ void ScraperWorker::run() {
                 QString((game.videoFormat.isEmpty() ? "\033[1;31mNO"
                                                     : "\033[1;32mYES")) +
                 "\033[0m" +
-                QString((game.videoData.size() <= config.videoSizeLimit
+                QString((game.videoSize <= config.videoSizeLimit
                              ? ""
                              : " (size exceeded, uncached)")) +
                 " (" + game.videoSrc + ")\n");
@@ -519,16 +532,26 @@ void ScraperWorker::run() {
         if (config.manuals) {
             output.append(
                 "Manual:         " +
-                QString((game.manualData.isEmpty() ? "\033[1;31mNO"
-                                                   : "\033[1;32mYES")) +
+                QString((game.manualSrc.isEmpty() && game.manualData.isEmpty()
+                             ? "\033[1;31mNO"
+                             : "\033[1;32mYES")) +
                 "\033[0m (" + game.manualSrc + ")\n");
         }
         if (config.fanart) {
             output.append(
                 "Fanart:         " +
-                QString((game.fanartData.isEmpty() ? "\033[1;31mNO"
-                                                   : "\033[1;32mYES")) +
+                QString((game.fanartSrc.isEmpty() && game.fanartData.isEmpty()
+                             ? "\033[1;31mNO"
+                             : "\033[1;32mYES")) +
                 "\033[0m (" + game.fanartSrc + ")\n");
+        }
+        if (config.backcovers) {
+            output.append("Backcover:      " +
+                          QString((game.backcoverSrc.isEmpty() &&
+                                           game.backcoverData.isEmpty()
+                                       ? "\033[1;31mNO"
+                                       : "\033[1;32mYES")) +
+                          "\033[0m (" + game.backcoverSrc + ")\n");
         }
         output.append("\nDescription: (" + game.descriptionSrc +
                       ")\n'\033[1;32m" +
@@ -540,8 +563,8 @@ void ScraperWorker::run() {
         if (!forceEnd) {
             forceEnd = limitReached(output);
         }
-        game.calculateCompleteness(config.videos, config.manuals,
-                                   config.fanart);
+        game.calculateCompleteness(config.videos, config.manuals, config.fanart,
+                                   config.backcovers);
         game.resetMedia();
         emit entryReady(game, output, debug);
         if (forceEnd) {
@@ -622,7 +645,8 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
     QString debugMsg = "Match was discarded as ROM file name contains (%1) "
                        "and scrape data contains %2 as release year. No "
                        "match. See config option ignoreYearInFilename, or "
-                       "remove/adjust year from ROM filename to rectify.\n";
+                       "remove/adjust year from ROM filename (or via "
+                       "aliasMap.csv) to rectify.\n";
     if (scraper->getType() == scraper->MatchType::MATCH_ONE) {
         GameEntry entry = gameEntries.first();
         releaseYear = getReleaseYear(entry.releaseDate);
@@ -640,8 +664,11 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
         return game;
     }
     if (config.scraper == "cache" ||
-        (config.scraper == "openretro" && gameEntries.first().url.isEmpty()) ||
-        (config.scraper == "gamebase" && gameEntries.size() == 1)) {
+        (config.scraper == "openretro" &&
+         gameEntries.first().url.isEmpty() /* exact WHDload match */) ||
+        (config.scraper == "gamebase" && gameEntries.size() == 1) ||
+        (config.scraper == "worldofspectrum" &&
+         gameEntries.first().url.isEmpty() /* exact one match */)) {
         lowestDistance = 0;
         game = gameEntries.first();
         game.title = StrTools::xmlUnescape(game.title);
@@ -667,10 +694,9 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
             }
         }
         releaseYear = getReleaseYear(entry.releaseDate);
-        // If year was specified, and doesn't match, skip.
         if (compareYear != UNDEF_YEAR && releaseYear != UNDEF_YEAR &&
             compareYear != releaseYear) {
-            debug.append(debugMsg.arg(compareYear).arg(releaseYear));
+            // If year was specified, and doesn't match, skip.
             continue;
         }
         if (config.scraper != "openretro") {
@@ -688,15 +714,15 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
         return game;
     }
 
-    int mostSimilar = 0;
+    int bestMatchIdx = 0;
     // Run through the potentials and find the best match
-    for (int a = 0; a < potentials.length(); ++a) {
-        QString entryTitle = potentials.at(a).title;
+    for (int idx = 0; idx < potentials.length(); ++idx) {
+        game = potentials.at(idx);
+        QString entryTitle = game.title;
 
         // If we have a perfect hit, always use this result
         if (compareTitle == entryTitle) {
             lowestDistance = 0;
-            game = potentials.at(a);
             return game;
         }
 
@@ -705,7 +731,6 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
                      matchTitles(entryTitle, compareTitle);
         if (match) {
             lowestDistance = 0;
-            game = potentials.at(a);
             return game;
         }
 
@@ -716,11 +741,11 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
         QList<QString> entryTitleWords = splitTitle(entryTitle);
         if (matchWords(compareTitleWords, entryTitleWords)) {
             lowestDistance = 0;
-            return potentials.at(a);
+            return game;
         }
         if (matchWords(entryTitleWords, compareTitleWords)) {
             lowestDistance = 0;
-            return potentials.at(a);
+            return game;
         }
 
         // If only one title has a subtitle (eg. has ":" or similar in name),
@@ -742,7 +767,6 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
                 if (entLower.right(comLower.length()) == comLower &&
                     comLower.length() >= 10) {
                     lowestDistance = 0;
-                    game = potentials.at(a);
                     return game;
                 }
                 entryTitle =
@@ -757,7 +781,6 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
                 if (comLower.right(entLower.length()) == entLower &&
                     entLower.length() >= 10) {
                     lowestDistance = 0;
-                    game = potentials.at(a);
                     return game;
                 }
                 compareTitle =
@@ -769,15 +792,26 @@ GameEntry ScraperWorker::getBestEntry(const QList<GameEntry> &gameEntries,
             }
         }
 
-        int currentDistance = editDistance(
+        int currentDistance = 0;
+        if (!config.ignoreYearInFilename && compareYear != UNDEF_YEAR) {
+            if (getReleaseYear(game.releaseDate) == compareYear) {
+                // bonus to place this match highest
+                currentDistance = -2;
+            }
+        }
+
+        currentDistance += editDistance(
             StrTools::xmlUnescape(compareTitle).toLower().toStdString(),
             StrTools::xmlUnescape(entryTitle).toLower().toStdString());
         if (currentDistance < lowestDistance) {
             lowestDistance = currentDistance;
-            mostSimilar = a;
+            bestMatchIdx = idx;
         }
     }
-    game = potentials.at(mostSimilar);
+    if (lowestDistance < 0) {
+        lowestDistance = 0;
+    }
+    game = potentials.at(bestMatchIdx);
     return game;
 }
 
@@ -880,141 +914,6 @@ GameEntry ScraperWorker::getEntryFromUser(const QList<GameEntry> &gameEntries,
     return suggestedGame;
 }
 
-void ScraperWorker::copyMedia(MediaHint mediaHint, const QString &baseName,
-                              const QString &subPath, GameEntry &game,
-                              bool isBatocera) {
-    QString cacheFn, fnExt, mediaTypeFolder;
-    bool mediaTypeEnabled = false;
-    bool skipExisting = false;
-    QByteArray data;
-    QMimeDatabase db;
-
-    if (mediaHint & MediaHint::VIDEO & !game.videoFile.isEmpty()) {
-        fnExt = game.videoFormat;
-        cacheFn = game.videoFile;
-        mediaTypeEnabled = config.videos;
-        data = game.videoData;
-        mediaTypeFolder = config.videosFolder;
-        skipExisting = config.skipExistingVideos;
-    } else if (mediaHint & MediaHint::MANUAL && !game.manualFile.isEmpty()) {
-        QMimeType mime = db.mimeTypeForFile(game.manualFile);
-        fnExt = mime.preferredSuffix();
-        cacheFn = game.manualFile;
-        mediaTypeEnabled = config.manuals;
-        data = game.manualData;
-        mediaTypeFolder = config.manualsFolder;
-        skipExisting = config.skipExistingManuals;
-    } else if (mediaHint & MediaHint::FANART && !game.fanartFile.isEmpty()) {
-        QMimeType mime = db.mimeTypeForFile(game.fanartFile);
-        fnExt = mime.preferredSuffix();
-        cacheFn = game.fanartFile;
-        mediaTypeEnabled = config.fanart;
-        data = game.fanartData;
-        mediaTypeFolder = config.fanartsFolder;
-        skipExisting = config.skipExistingFanart;
-    } else if (mediaHint & MediaHint::SCREENSHOT &&
-               !game.screenshotFile.isEmpty()) {
-        // ES-DE only
-        QMimeType mime = db.mimeTypeForFile(game.screenshotFile);
-        fnExt = mime.preferredSuffix();
-        cacheFn = game.screenshotFile;
-        mediaTypeEnabled = true;
-        data = game.screenshotData;
-        mediaTypeFolder = config.screenshotsFolder;
-        skipExisting = false;
-    }
-
-    // assume to ignore the media in gamelist output if skip existing videos /
-    // manuals is _not_ set or media type is not enabled at all. NB: if
-    // skipExisting is false the zap flag will be set false iff copy/symlink
-    // fails
-    bool zapInGamelist = !skipExisting || !mediaTypeEnabled;
-    // mediaTypeFolder is set iff frontend supports output of that media
-    // TODO: the logic here is still confusing
-    QString absMediaFn;
-    if (mediaTypeEnabled && !fnExt.isEmpty() && QFile::exists(cacheFn) &&
-        !mediaTypeFolder.isEmpty()) {
-
-        absMediaFn = baseName;
-        if (isBatocera) {
-            if (mediaHint & MediaHint::FANART) {
-                absMediaFn = Batocera::getFileNameFor("fanart", absMediaFn);
-            } else if (mediaHint & MediaHint::MANUAL) {
-                absMediaFn = Batocera::getFileNameFor("manual", absMediaFn);
-            } else if (mediaHint & MediaHint::VIDEO) {
-                absMediaFn = Batocera::getFileNameFor("video", absMediaFn);
-            }
-        }
-        if (absMediaFn == baseName) {
-            absMediaFn = baseName % "." % fnExt;
-        }
-
-        if (subPath != ".") {
-            absMediaFn = subPath % "/" % absMediaFn;
-            // try to create sub paths for gamelist media files
-            if (QFileInfo fi = QFileInfo(mediaTypeFolder % "/" % absMediaFn);
-                !QDir().mkpath(fi.absolutePath())) {
-                qWarning() << "Path could not be created" << fi.absolutePath()
-                           << " Check file permissions, gamelist binary data "
-                              "maybe incomplete.";
-            }
-        }
-        absMediaFn = mediaTypeFolder % "/" % absMediaFn;
-
-        if (!(skipExisting && QFile::exists(absMediaFn))) {
-            QFile::remove(absMediaFn);
-            if (config.symlink && mediaHint & MediaHint::VIDEO) {
-                // symlink
-                if (QFile::link(cacheFn, absMediaFn)) {
-                    zapInGamelist = false;
-                } else {
-                    qWarning() << "Symlink failed, media entry will be not in "
-                                  "game list: "
-                               << absMediaFn << "->" << cacheFn;
-                }
-            } else {
-                QFile fh(absMediaFn);
-                if (fh.open(QIODevice::WriteOnly)) {
-                    fh.write(data);
-                    fh.close();
-                    zapInGamelist = false;
-                } else {
-                    qWarning()
-                        << "Copy failed, media entry will be not in game list: "
-                        << cacheFn << "to" << absMediaFn;
-                }
-            }
-        }
-    }
-    if (mediaHint & MediaHint::VIDEO) {
-        if (zapInGamelist) {
-            game.videoFormat = "";
-            game.videoData.clear();
-            game.videoFile = "";
-        } else {
-            game.videoFile = absMediaFn;
-        }
-    } else if (mediaHint & MediaHint::MANUAL) {
-        if (zapInGamelist) {
-            game.manualData.clear();
-            game.manualFile = "";
-        } else {
-            game.manualFile = absMediaFn;
-        }
-    } else if (mediaHint & MediaHint::FANART) {
-        if (zapInGamelist) {
-            game.fanartData.clear();
-            game.fanartFile = "";
-        } else {
-            game.fanartFile = absMediaFn;
-        }
-    } else {
-        // never output when using ES-DE
-        game.screenshotData.clear();
-        game.screenshotFile = "";
-    }
-}
-
 int ScraperWorker::getReleaseYear(const QString releaseDateString) {
     // Most scrapers use "yyyy-MM-dd" format
     QDate releaseDate = QDate::fromString(releaseDateString, Qt::ISODate);
@@ -1028,13 +927,3 @@ int ScraperWorker::getReleaseYear(const QString releaseDateString) {
     }
     return UNDEF_YEAR;
 }
-
-// --- Console colors ---
-// Black        0;30     Dark Gray     1;30
-// Red          0;31     Light Red     1;31
-// Green        0;32     Light Green   1;32
-// Brown/Orange 0;33     Yellow        1;33
-// Blue         0;34     Light Blue    1;34
-// Purple       0;35     Light Purple  1;35
-// Cyan         0;36     Light Cyan    1;36
-// Light Gray   0;37     White         1;37

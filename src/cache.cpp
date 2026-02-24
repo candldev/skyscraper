@@ -29,6 +29,7 @@
 #include "cli.h"
 #include "config.h"
 #include "nametools.h"
+#include "pathtools.h"
 #include "queue.h"
 #include "skyscraper.h"
 
@@ -46,6 +47,8 @@
 #include <QXmlStreamReader>
 #include <iostream>
 
+#define RESIZE_PX_THRESHOLD 800
+
 // user defined resource cache entries
 const QString SRC_USER = "user";
 
@@ -59,7 +62,18 @@ const QString ATTR_SRC = "source";
 const QString ATTR_TS = "timestamp";
 const QString ATTR_TYPE = "type";
 
-enum class Excludes : char { NONE = 0, VIDEO = 1, MANUAL = 2, FANART = 4 };
+const QStringList NO_RESIZE_MEDIA = {"fanart", "manual", "backcover"};
+
+// binary cache items to exclude
+// TODO streamline with GameEntry::Types
+enum Excludes : char {
+    NONE = 0,
+    VIDEO = 1,
+    MANUAL = VIDEO << 1,
+    FANART = VIDEO << 2,
+    BACKCOVER = VIDEO << 3,
+    ALL = 127
+};
 
 Excludes operator|(Excludes lhs, Excludes rhs) {
     using ExclType = std::underlying_type<Excludes>::type;
@@ -94,8 +108,17 @@ static inline QStringList binTypes(Excludes bins = Excludes::NONE) {
     if (Excludes::FANART != (bins & Excludes::FANART)) {
         binTypes.append("fanart");
     }
+    if (Excludes::BACKCOVER != (bins & Excludes::BACKCOVER)) {
+        binTypes.append("backcover");
+    }
     return binTypes;
 };
+
+const QStringList Cache::getAllResourceTypes() {
+    return txtTypes() + binTypes();
+}
+
+const QStringList Cache::getBinResourceTypes() { return binTypes(); }
 
 // this is the logical order used for keywords for cache maintenance
 static inline QStringList getKeywordOrder() {
@@ -122,10 +145,6 @@ static inline QString pluralizeWord(QString word, bool plural) {
 
 static inline std::string pluralizeWordStd(QString word, bool plural) {
     return pluralizeWord(word, plural).toStdString();
-}
-
-const QStringList Cache::getAllResourceTypes() {
-    return txtTypes() + binTypes();
 }
 
 Cache::Cache(const QString &cacheFolder) {
@@ -193,7 +212,9 @@ bool Cache::read() {
             }
         }
         printf("\033[1;32mDone!\033[0m\n");
-        printf("Cached %d files\n\n", static_cast<int>(fileEntries.count()));
+        int count = static_cast<int>(fileEntries.count());
+        printf("Cached %d %s\n\n", count,
+               pluralizeWordStd("file", count != 1).c_str());
 
         printf("Reading and parsing resource cache, please wait... ");
         fflush(stdout);
@@ -297,10 +318,11 @@ void Cache::printPriorities(QString cacheId) {
     }
 
     const QList<QPair<QString, QString>> prioBinRes = {
-        {"Cover", game.coverSrc},     {"Screenshot", game.screenshotSrc},
-        {"Wheel", game.wheelSrc},     {"Marquee", game.marqueeSrc},
-        {"Texture", game.textureSrc}, {"Video", game.videoSrc},
-        {"Manual", game.manualSrc},   {"Fanart", game.fanartSrc}};
+        {"Cover", game.coverSrc},        {"Screenshot", game.screenshotSrc},
+        {"Wheel", game.wheelSrc},        {"Marquee", game.marqueeSrc},
+        {"Texture", game.textureSrc},    {"Video", game.videoSrc},
+        {"Manual", game.manualSrc},      {"Fanart", game.fanartSrc},
+        {"Backcover", game.backcoverSrc}};
 
     // print out summary what was present in cache and from which source
     for (auto const &e : prioBinRes) {
@@ -346,30 +368,22 @@ void Cache::printCacheEditMenu() {
            "\033[1;33mx\033[0m)\n");
 }
 
-void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
-                          const QString &type) {
+int Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
+                         const QString &type) {
     // Check sanity of command and parameters, if any
-    if (!command.isEmpty()) {
-        if (command == "new") {
-            if (!txtTypes().contains(type)) {
-                QStringList sortedTypes = txtTypes();
-                sortedTypes.sort();
-                printf("Unknown resource type '%s', please specify any of the "
-                       "following: '%s'.\n",
-                       type.toStdString().c_str(),
-                       sortedTypes.join("', '").toStdString().c_str());
-                return;
-            }
-        } else {
-            printf("Unknown command '%s', please specify one of the following: "
-                   "'new'.\n",
-                   command.toStdString().c_str());
-            return;
-        }
+    if (command == "new" && !txtTypes().contains(type)) {
+        QStringList sortedTypes = txtTypes();
+        sortedTypes.sort();
+        printf("\033[1;31mUnknown resource type '%s', please specify "
+               "one of the following:\033[0m '%s'.\n",
+               type.toStdString().c_str(),
+               sortedTypes.join("', '").toStdString().c_str());
+        return -1;
     }
 
+    int retVal = 0;
     int queueLength = queue->length();
-    printf("\033[1;33mEntering resource cache editing mode! This mode allows "
+    printf("\033[1mEntering resource cache editing mode.\n\nThis mode allows "
            "you to edit textual resources for your files. To add media "
            "resources use the 'import' scraping module instead.\nYou "
            "can provide one or more file names on command line to edit "
@@ -595,9 +609,9 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                         }
                         resources.append(newRes);
                         if (updated) {
-                            printf("[*] Updated existing ");
+                            printf("[\033[1;34m*\033[0m] Updated existing ");
                         } else {
-                            printf("[+] Added ");
+                            printf("[\033[1;32m+\033[0m] Added ");
                         }
                         printf("resource with value '\033[1;32m%s\033[0m'\n\n",
                                value.toStdString().c_str());
@@ -692,7 +706,8 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                         QString delType = resources[idxInResList].type;
                         QString delSource = resources[idxInResList].source;
                         resources.removeAt(idxInResList);
-                        printf("[-] Removed resource: %s (%s)\n\n",
+                        printf("[\033[1;31m-\033[0m] Removed resource: %s "
+                               "(%s)\n\n",
                                delType.toStdString().c_str(),
                                delSource.toStdString().c_str());
 
@@ -706,7 +721,8 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                 while (it.hasNext()) {
                     Resource res = it.next();
                     if (res.cacheId == cacheId) {
-                        printf("[-] Removed \033[1;33m%s\033[0m (%s) with "
+                        printf("[\033[1;31m-\033[0m] Removed "
+                               "\033[1;33m%s\033[0m (%s) with "
                                "value '\033[1;32m%s\033[0m'\n",
                                res.type.toStdString().c_str(),
                                res.source.toStdString().c_str(),
@@ -763,7 +779,8 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                             removed++;
                         }
                     }
-                    printf("[-] Removed %d %s connected to rom from "
+                    printf("[\033[1;31m-\033[0m] Removed %d %s connected to "
+                           "rom from "
                            "module '\033[1;32m%s\033[0m'\n\n",
                            removed,
                            pluralizeWordStd("resource", removed != 1).c_str(),
@@ -821,7 +838,8 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                             removed++;
                         }
                     }
-                    printf("[-] Removed %d %s connected to rom of "
+                    printf("[\033[1;31m-\033[0m] Removed %d %s connected to "
+                           "rom of "
                            "type '\033[1;32m%s\033[0m'\n\n",
                            removed,
                            pluralizeWordStd("resource", removed != 1).c_str(),
@@ -832,8 +850,11 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
                            typeInput.c_str());
                 }
             } else if (userInput == "c" || userInput == "x") {
-                printf("[!] Exiting without saving changes.\n");
-                exit(0);
+                printf(
+                    "[\033[1;33m!\033[0m] Exiting without saving changes.\n");
+                queue->clear();
+                doneEdit = true;
+                retVal = 1;
             } else if (userInput == "q" || userInput == "w") {
                 queue->clear();
                 doneEdit = true;
@@ -844,11 +865,11 @@ void Cache::editResources(QSharedPointer<Queue> queue, const QString &command,
             }
         }
     }
+    return retVal;
 }
 
 bool Cache::purgeResources(QString purgeStr) {
     purgeStr.replace("purge:", "");
-    printf("Purging requested resources from cache, please wait...\n");
 
     QString module = "";
     QString type = "";
@@ -856,14 +877,17 @@ bool Cache::purgeResources(QString purgeStr) {
     QList<QString> definitions = purgeStr.split(",");
     for (const auto &definition : definitions) {
         if (definition.left(2) == "m=") {
-            module = definition.split("=").at(1).simplified();
-            printf("Module: '%s'\n", module.toStdString().c_str());
+            module = definition.split("=").at(1);
         }
         if (definition.left(2) == "t=") {
-            type = definition.split("=").at(1).simplified();
-            printf("Type: '%s'\n", type.toStdString().c_str());
+            type = definition.split("=").at(1);
         }
     }
+    QString msg = QString(
+        "module is '\033[1;33m%1\033[0m' and type is '\033[1;33m%2\033[0m'");
+    msg = msg.arg(module.isEmpty() ? "<any>" : module)
+              .arg(type.isEmpty() ? "<any>" : type);
+    printf("Purging resources where %s...\n", msg.toStdString().c_str());
 
     int purged = 0;
 
@@ -871,7 +895,9 @@ bool Cache::purgeResources(QString purgeStr) {
     while (it.hasNext()) {
         Resource res = it.next();
         bool remove = false;
-        if (res.source == module || res.type == type) {
+        if ((res.source == module && res.type == type) ||
+            (module.isEmpty() && res.type == type) ||
+            (res.source == module && type.isEmpty())) {
             remove = true;
         }
         if (remove) {
@@ -882,14 +908,20 @@ bool Cache::purgeResources(QString purgeStr) {
             purged++;
         }
     }
-    printf("Successfully purged %d %s from the cache.\n", purged,
-           pluralizeWordStd("resource", purged != 1).c_str());
+    if (purged == 0) {
+        printf("No resources for the current platform found or no match for "
+               "the criteria.\n");
+        return false;
+    } else {
+        printf("Successfully purged %d %s from the resource cache.\n", purged,
+               pluralizeWordStd("resource", purged != 1).c_str());
+    }
     return true;
 }
 
-bool Cache::purgeAll(const bool unattend) {
+bool Cache::purgeAllOnSinglePlatform(const bool unattend) {
     if (!unattend) {
-        printf("\033[1;31mWARNING! You are about to purge / remove ALL "
+        printf("\033[1;31mWARNING! You are about to remove ALL "
                "resources from the Skyscaper cache connected to the currently "
                "selected platform. THIS CANNOT BE UNDONE!\033[0m\n\n");
         printf("\033[1;34mDo you wish to continue\033[0m (y/N)? ");
@@ -923,12 +955,13 @@ bool Cache::purgeAll(const bool unattend) {
         it.remove();
         purged++;
     }
-    printf("\033[1;32m Done!\033[0m\n");
     if (purged == 0) {
+        printf("\033[1;32m Foiled!\033[0m\n");
         printf("No resources for the current platform found in the resource "
                "cache.\n");
         return false;
     } else {
+        printf("\033[1;32m Done!\033[0m\n");
         printf("Successfully purged %d %s from the resource cache.\n", purged,
                pluralizeWordStd("resource", purged != 1).c_str());
     }
@@ -938,14 +971,15 @@ bool Cache::purgeAll(const bool unattend) {
 
 bool Cache::isCommandValidOnAllPlatform(const QString &command) {
     QList<QString> validCommands({"help", "purge:all", "vacuum", "validate"});
-
     return validCommands.contains(command) ||
-           command.contains("report:missing");
+           command.startsWith("report:missing=");
 }
 
-void Cache::purgeAllPlatform(Settings config, Skyscraper *app) {
-    printf("\033[1;31mWARNING! You are about to purge / remove ALL "
-           "resources from the Skyscaper cache. \033[0m\n\n");
+void Cache::purgeAllOnAllPlatforms(Settings &config, Skyscraper *app) {
+    printf("\033[1;31mWARNING! You are about to remove ALL "
+           "resources for EVERY platform from the Skyscaper cache. Please "
+           "consider making a backup of your Skyscraper cache before "
+           "performing this action. THIS CANNOT BE UNDONE!\033[0m\n\n");
     printf("\033[1;34mDo you wish to continue\033[0m (y/N)? ");
     std::string userInput = "";
     getline(std::cin, userInput);
@@ -960,7 +994,7 @@ void Cache::purgeAllPlatform(Settings config, Skyscraper *app) {
          cacheDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         config.platform = platform;
         Cache cache(cacheDir.filePath(platform));
-        if (cache.read() && cache.purgeAll(true)) {
+        if (cache.read() && cache.purgeAllOnSinglePlatform(true)) {
             app->state = Skyscraper::OpMode::NO_INTR;
             cache.write();
             app->state = Skyscraper::OpMode::SINGLE;
@@ -968,19 +1002,28 @@ void Cache::purgeAllPlatform(Settings config, Skyscraper *app) {
     }
 }
 
-void Cache::reportAllPlatform(Settings config, Skyscraper *app) {
+bool Cache::reportAllPlatform(Settings &config, Skyscraper *app) {
     QDir cacheDir(config.cacheFolder);
+    QString initCacheFolder = config.cacheFolder;
+    QString initInputFolder = config.inputFolder;
     for (const auto &platform :
          cacheDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         config.platform = platform;
-        Cache cache(cacheDir.filePath(platform));
+        config.cacheFolder = PathTools::concatPath(initCacheFolder, platform);
+        config.inputFolder = PathTools::concatPath(initInputFolder, platform);
+        qDebug() << "reportAllPlatform()" << config.inputFolder;
+        Cache cache(config.cacheFolder);
         if (cache.read()) {
-            cache.assembleReport(config, app->getPlatformFileExtensions());
-        }
+            if (!cache.assembleReport(
+                    config, app->getPlatformFileExtensions(platform))) {
+                return false;
+            }
+        } // ignore empty cache: cache.read() returns false
     }
+    return true;
 }
 
-void Cache::vacuumAllPlatform(Settings config, Skyscraper *app) {
+void Cache::vacuumAllPlatform(Settings &config, Skyscraper *app) {
     printf("\033[1;33mWARNING! Vacuuming your Skyscraper cache removes all "
            "resources that don't match your current romset. Please consider "
            "making a backup of your "
@@ -995,14 +1038,19 @@ void Cache::vacuumAllPlatform(Settings config, Skyscraper *app) {
         return;
     }
 
+    QString initCacheFolder = config.cacheFolder;
+    QString initInputFolder = config.inputFolder;
     QDir cacheDir(config.cacheFolder);
     for (const auto &platform :
          cacheDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-        Cache cache(cacheDir.filePath(platform));
         config.platform = platform;
+        config.cacheFolder = PathTools::concatPath(initCacheFolder, platform);
+        config.inputFolder = PathTools::concatPath(initInputFolder, platform);
+        qDebug() << "vacuumAllPlatform()" << config.inputFolder;
+        Cache cache(config.cacheFolder);
         if (cache.read() &&
             cache.vacuumResources(QDir(config.inputFolder).filePath(platform),
-                                  app->getPlatformFileExtensions(),
+                                  app->getPlatformFileExtensions(platform),
                                   config.verbosity, true)) {
             app->state = Skyscraper::OpMode::NO_INTR;
             cache.write();
@@ -1011,11 +1059,16 @@ void Cache::vacuumAllPlatform(Settings config, Skyscraper *app) {
     }
 }
 
-void Cache::validateAllPlatform(Settings config, Skyscraper *app) {
+void Cache::validateAllPlatform(Settings &config, Skyscraper *app) {
+    QString initCacheFolder = config.cacheFolder;
+    QString initInputFolder = config.inputFolder;
     QDir cacheDir(config.cacheFolder);
     for (const auto &platform :
          cacheDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         config.platform = platform;
+        config.cacheFolder = PathTools::concatPath(initCacheFolder, platform);
+        config.inputFolder = PathTools::concatPath(initInputFolder, platform);
+        qDebug() << "validateAllPlatform()" << config.inputFolder;
         Cache cache(cacheDir.filePath(platform));
         if (cache.read()) {
             cache.validate();
@@ -1041,7 +1094,7 @@ QList<QFileInfo> Cache::getFileInfos(const QString &inputFolder,
             fileInfos.append(dirIt.fileInfo());
         }
         if (fileInfos.isEmpty()) {
-            printf("\nInput folder returned no entries...\n\n");
+            printf("Input folder returned no entries...\n");
         }
     } else {
         printf("Found less than two suffix filters. Something is wrong...\n");
@@ -1069,15 +1122,8 @@ QList<QString> Cache::getCacheIdList(const QList<QFileInfo> &fileInfos) {
     return cacheIdList;
 }
 
-void Cache::assembleReport(const Settings &config, const QString filter) {
+bool Cache::assembleReport(const Settings &config, const QString filter) {
     QString reportStr = config.cacheOptions;
-
-    if (!reportStr.contains("report:missing=")) {
-        printf("\033[1;31mAmbiguous cache report option '%s'.\n\033[0m",
-               reportStr.toStdString().c_str());
-        Cli::cacheReportMissingUsage();
-        return;
-    }
     reportStr.remove("report:missing=");
 
     QString missingOption = reportStr.simplified();
@@ -1110,21 +1156,14 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
             printf("\033[1;31mUnknown resource type '%s'!\033[0m\n",
                    resType.toStdString().c_str());
             Cli::cacheReportMissingUsage();
-            return;
+            return false;
         }
     }
-    if (resTypeList.isEmpty()) {
-        printf("Resource type list is empty, cancelling...\n");
-        return;
-    } else {
-        printf("Creating %s for resource %s:\n",
-               pluralizeWordStd("report", resTypeList.size() != 1).c_str(),
-               pluralizeWordStd("type", resTypeList.size() != 1).c_str());
-        for (const auto &resType : resTypeList) {
-            printf("  %s\n", resType.toStdString().c_str());
-        }
-        printf("\n");
-    }
+
+    printf("Creating %s for resource %s:\n",
+           pluralizeWordStd("report", resTypeList.size() != 1).c_str(),
+           pluralizeWordStd("type", resTypeList.size() != 1).c_str());
+    printf("  %s\n", resTypeList.join(", ").toStdString().c_str());
 
     // Create the reports folder
     QDir reportsDir(Config::getSkyFolder(Config::SkyFolderType::REPORT));
@@ -1133,7 +1172,7 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
             printf("Couldn't create reports folder '%s'. Please check "
                    "permissions then try again...\n",
                    reportsDir.absolutePath().toStdString().c_str());
-            return;
+            return false;
         }
     }
 
@@ -1145,8 +1184,9 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
     if (!config.includePattern.isEmpty()) {
         fileInfos.filterFiles(config.includePattern, true);
     }
-    printf("%d compatible files found for the '%s' platform!\n",
-           static_cast<int>(fileInfos.length()),
+    int count = static_cast<int>(fileInfos.length());
+    printf("%d compatible %s found for the '%s' platform!\n", count,
+           pluralizeWordStd("file", count != 1).c_str(),
            config.platform.toStdString().c_str());
     printf("Creating file id list for all files, please wait...");
     QList<QString> cacheIdList = getCacheIdList(fileInfos);
@@ -1155,18 +1195,24 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
     if (fileInfos.length() != cacheIdList.length()) {
         printf("Length of cache id list mismatch the number of files, "
                "something is wrong! Please file an issue. Can't continue...\n");
-        return;
+        return false;
     }
 
     QString dateTime = QDateTime::currentDateTime().toString("yyyyMMdd");
+    bool hasMissing = false;
     for (const auto &resType : resTypeList) {
-        QFile reportFile(reportsDir.absolutePath() + "/report-" +
-                         config.platform + "-missing_" + resType + "-" +
-                         dateTime + ".txt");
-        printf("Report filename: '\033[1;32m%s\033[0m'\nAssembling report, "
-               "please wait...",
-               reportFile.fileName().toStdString().c_str());
-        if (reportFile.open(QIODevice::WriteOnly)) {
+        QString rFn = QString("%1/report-%2-missing_%3-%4.txt")
+                          .arg(reportsDir.absolutePath())
+                          .arg(config.platform)
+                          .arg(resType)
+                          .arg(dateTime);
+        QFile reportFile(rFn);
+        printf("Assembling report for platform '\033[1;32m%s\033[0m' and "
+               "resource '\033[1;32m%s\033[0m', please wait...",
+               config.platform.toStdString().c_str(),
+               resType.toStdString().c_str());
+
+        if (fileInfos.length() > 0 && reportFile.open(QIODevice::WriteOnly)) {
             int missing = 0;
             int dots = 0;
             int dotMod = fileInfos.size() * 0.1 + 1;
@@ -1191,11 +1237,17 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
                         fileInfos.at(a).absoluteFilePath().toUtf8() + "\n");
                 }
             }
+            hasMissing |= missing > 0;
             reportFile.close();
-            printf("\033[1;32m Done!\033[0m\n\033[1;33m%d %s "
-                   "do miss the '%s' resource.\033[0m\n\n",
-                   missing, pluralizeWordStd("file", missing != 1).c_str(),
+            printf("\033[1;32m Done!\033[0m\n\033[1;33m  %d of %d %s "
+                   "miss the '%s' resource.\033[0m\n",
+                   missing, static_cast<int>(fileInfos.length()),
+                   pluralizeWordStd("file", fileInfos.length() != 1).c_str(),
                    resType.toStdString().c_str());
+            if (missing > 0) {
+                printf("  Files in: %s\n", PathTools::pathToCStr(rFn));
+            }
+            printf("\n");
         } else {
             printf("Report file could not be opened for writing, please check "
                    "permissions of folder '%s', then try "
@@ -1203,14 +1255,17 @@ void Cache::assembleReport(const Settings &config, const QString filter) {
                    Config::getSkyFolder(Config::SkyFolderType::REPORT)
                        .toStdString()
                        .c_str());
-            return;
+            return false;
         }
     }
-    printf("\033[1;32mAll done!\033[0m\nConsider using the '\033[1;33m--cache "
-           "edit --includefrom <REPORTFILE>\033[0m' or the '\033[1;33m-s "
-           "import\033[0m' module to add the missing resources. Check "
-           "'\033[1;33m--help\033[0m' and '\033[1;33m--cache help\033[0m' for "
-           "more information.\n\n");
+    if (hasMissing) {
+        printf("\033[1;32mAll done!\033[0m\nConsider using the "
+               "'\033[1;33m--cache edit --includefrom <REPORTFILE>\033[0m' or "
+               "the '\033[1;33m-s import\033[0m' module to add the missing "
+               "resources. Check '\033[1;33m--help\033[0m' and "
+               "'\033[1;33m--cache help\033[0m' for more information.\n\n");
+    }
+    return true;
 }
 
 bool Cache::vacuumResources(const QString inputFolder, const QString filter,
@@ -1239,9 +1294,6 @@ bool Cache::vacuumResources(const QString inputFolder, const QString filter,
         }
     }
 
-    printf("Vacuuming cache for %s platform, this can take several minutes, "
-           "please wait...",
-           cacheDir.dirName().toStdString().c_str());
     QList<QFileInfo> fileInfos = getFileInfos(inputFolder, filter);
     // Clean the quick id's aswell
     QMap<QString, QPair<qint64, QString>> quickIdsCleaned;
@@ -1258,18 +1310,13 @@ bool Cache::vacuumResources(const QString inputFolder, const QString filter,
         return false;
     }
 
+    printf("Vacuuming cache for %s platform, hang on...\n",
+           cacheDir.dirName().toStdString().c_str());
+
     int vacuumed = 0;
     {
-        int dots = 0;
-        int dotMod = resources.size() * 0.1 + 1;
-
         QMutableListIterator<Resource> it(resources);
         while (it.hasNext()) {
-            if (dots % dotMod == 0) {
-                printf(".");
-                fflush(stdout);
-            }
-            dots++;
             Resource res = it.next();
             bool remove = true;
             for (const auto &cacheId : cacheIdList) {
@@ -1293,8 +1340,8 @@ bool Cache::vacuumResources(const QString inputFolder, const QString filter,
     }
     printf("\033[1;32m Done!\033[0m\n");
     if (vacuumed == 0) {
-        printf("All resources match a file in your romset. No resources "
-               "vacuumed.\n");
+        printf("All resources match a file in your romset. Done with "
+               "housekeeping.\n");
         return false;
     } else {
         printf("Successfully vacuumed %d resources from the resource cache.\n",
@@ -1321,7 +1368,8 @@ void Cache::printStats(bool totals) {
         {"Ages", 0},         {"Tags", 0},       {"Ratings", 0},
         {"ReleaseDates", 0}, {"Covers", 0},     {"Screenshots", 0},
         {"Wheels", 0},       {"Marquees", 0},   {"Textures", 0},
-        {"Videos", 0},       {"Manuals", 0},    {"Fanarts", 0}};
+        {"Videos", 0},       {"Manuals", 0},    {"Fanarts", 0},
+        {"Backcovers", 0}};
     for (auto it = resCountsMap.begin(); it != resCountsMap.end(); ++it) {
         if (!totals) {
             printf("'\033[1;32m%s\033[0m' module\n",
@@ -1345,6 +1393,7 @@ void Cache::printStats(bool totals) {
         resTotals["Videos"] += it.value().videos;
         resTotals["Manuals"] += it.value().manuals;
         resTotals["Fanarts"] += it.value().fanart;
+        resTotals["Backcovers"] += it.value().backcovers;
         if (!totals) {
             for (auto it = resTotals.begin(); it != resTotals.end(); ++it) {
                 printf("  %12s : %d\n", it.key().toStdString().c_str(),
@@ -1397,6 +1446,8 @@ void Cache::addToResCounts(const QString source, const QString type) {
         resCountsMap[source].manuals++;
     } else if (type == "fanart") {
         resCountsMap[source].fanart++;
+    } else if (type == "backcover") {
+        resCountsMap[source].backcovers++;
     }
 }
 
@@ -1435,7 +1486,7 @@ void Cache::readPriorities() {
             continue;
         }
         QList<QString> sources;
-        // ALWAYS prioritize 'user' resources highest (added with edit mode)
+        // Always prioritize 'user' resources highest (added by cache edit mode)
         sources.append(SRC_USER);
         QDomNodeList sourceNodes = orderNodes.at(a).childNodes();
         if (sourceNodes.isEmpty()) {
@@ -1456,7 +1507,7 @@ void Cache::readPriorities() {
                errors, errors == 1 ? "" : "s",
                prioFilePath().toStdString().c_str());
     }
-    printf("!\n\n");
+    printf("!\n");
 }
 
 bool Cache::write(const bool onlyQuickId) {
@@ -1490,8 +1541,9 @@ bool Cache::write(const bool onlyQuickId) {
     QFile cacheFile(dbFilePath());
     if (cacheFile.open(QIODevice::WriteOnly)) {
         int resCountNew = static_cast<int>(resources.length());
-        printf("Writing %d (%d new) resources to cache, please wait... ",
-               resCountNew, resCountNew - resAtLoad);
+        int delta = resCountNew - resAtLoad;
+        printf("Writing %d (%d%s) resources to cache, please wait... ",
+               resCountNew, delta, delta < 0 ? "" : " new");
         fflush(stdout);
         QXmlStreamWriter xml(&cacheFile);
         xml.setAutoFormatting(true);
@@ -1647,12 +1699,6 @@ QList<Resource> Cache::getResources() { return resources; }
 
 void Cache::addResources(GameEntry &entry, const Settings &config,
                          QString &output) {
-    if (entry.source.isEmpty()) {
-        printf("Something is wrong, resource with cache id '%s' has no source, "
-               "exiting...\n",
-               entry.cacheId.toStdString().c_str());
-        exit(1);
-    }
     if (entry.cacheId.isEmpty()) {
         return;
     }
@@ -1690,6 +1736,7 @@ void Cache::addResources(GameEntry &entry, const Settings &config,
         {"texture", !entry.textureData.isEmpty()},
         {"manual", !entry.manualData.isEmpty()},
         {"fanart", !entry.fanartData.isEmpty()},
+        {"backcover", !entry.backcoverData.isEmpty()},
         {"video", !entry.videoData.isEmpty() && entry.videoFormat != ""}};
 
     for (auto const &t : binTypes()) {
@@ -1708,7 +1755,7 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                         const QString &cacheAbsolutePath,
                         const Settings &config, QString &output) {
     QMutexLocker locker(&cacheMutex);
-    bool notFound = true;
+    bool cacheMiss = true;
     // This type of iterator ensures we can delete items while iterating
     QMutableListIterator<Resource> it(resources);
     while (it.hasNext()) {
@@ -1718,14 +1765,14 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
             if (config.refresh) {
                 it.remove();
             } else {
-                notFound = false;
+                cacheMiss = false;
             }
             break;
         }
     }
 
-    if (notFound) {
-        bool okToAppend = true;
+    if (cacheMiss) {
+        bool addedToCache = true;
         QString cacheFile = cacheAbsolutePath + "/" + resource.value;
         if (binTypes(Excludes::VIDEO).contains(resource.type)) {
             QByteArray *imageData = nullptr;
@@ -1743,28 +1790,45 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                 imageData = &entry.fanartData;
             } else if (resource.type == "manual") {
                 imageData = &entry.manualData;
+            } else if (resource.type == "backcover") {
+                imageData = &entry.backcoverData;
             }
-            if (config.cacheResize && resource.type != "fanart" &&
-                resource.type != "manual") {
+            if (config.cacheResize &&
+                !NO_RESIZE_MEDIA.contains(resource.type)) {
                 QImage image;
                 if (imageData->size() > 0 && image.loadFromData(*imageData) &&
                     !image.isNull()) {
-                    int max = 800;
+                    const int max = RESIZE_PX_THRESHOLD;
+                    bool scaled = false;
                     if (image.width() > max || image.height() > max) {
                         image = image.scaled(max, max, Qt::KeepAspectRatio,
                                              Qt::SmoothTransformation);
+                        scaled = true;
                     }
                     QByteArray resizedData;
                     QBuffer b(&resizedData);
-                    b.open(QIODevice::WriteOnly);
+                    if (!b.open(QIODevice::WriteOnly)) {
+                        qWarning() << "Opening WriteOnly buffer failed with"
+                                   << b.openMode();
+                    }
                     if ((image.hasAlphaChannel() && hasAlpha(image)) ||
                         resource.type == "screenshot") {
-                        okToAppend = image.save(&b, "png");
+                        addedToCache = image.save(&b, "png");
+                        if (!addedToCache)
+                            qWarning()
+                                << "Save to buffer as PNG failed. Data not "
+                                   "written to cache.";
                     } else {
-                        okToAppend = image.save(&b, "jpg", config.jpgQuality);
+                        addedToCache = image.save(&b, "jpg", config.jpgQuality);
+                        if (!addedToCache)
+                            // fails on Qt 5.15.18 on NixOS 25.11 (missing
+                            // libqjpeg)
+                            qWarning()
+                                << "Save to buffer as JPG failed. Data not "
+                                   "written to cache.";
                     }
                     b.close();
-                    if (imageData->size() > resizedData.size()) {
+                    if (scaled && imageData->size() > resizedData.size()) {
                         if (config.verbosity >= 3) {
                             printf("%s: '%d' > '%d', choosing resize for "
                                    "optimal result!\n",
@@ -1775,10 +1839,10 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                         *imageData = resizedData;
                     }
                 } else {
-                    okToAppend = false;
+                    addedToCache = false;
                 }
             }
-            if (okToAppend) {
+            if (addedToCache) {
                 QFile f(cacheFile);
                 if (f.open(QIODevice::WriteOnly)) {
                     f.write(*imageData);
@@ -1786,7 +1850,7 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                 } else {
                     output.append("Error writing file: '" + f.fileName() +
                                   "' to cache. Please check permissions.");
-                    okToAppend = false;
+                    addedToCache = false;
                 }
             } else {
                 // Image was faulty and could not be saved to cache so we clear
@@ -1810,13 +1874,13 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                                 "\033[1;31mFailed!\033[0m (set higher "
                                 "'--verbosity N' level for more info)");
                             f.remove();
-                            okToAppend = false;
+                            addedToCache = false;
                         }
                     }
                 } else {
                     output.append("Error writing file: '" + f.fileName() +
                                   "' to cache. Please check permissions.");
-                    okToAppend = false;
+                    addedToCache = false;
                 }
             } else {
                 output.append(
@@ -1826,19 +1890,19 @@ void Cache::addResource(Resource &resource, GameEntry &entry,
                     "in '" %
                         Config::getSkyFolder(Config::SkyFolderType::CONFIG) %
                         "/config.ini.'");
-                okToAppend = false;
+                addedToCache = false;
                 entry.videoFormat = "";
             }
         }
 
-        if (okToAppend) {
-            if (binTypes(Excludes::VIDEO | Excludes::MANUAL | Excludes::FANART)
-                    .contains(resource.type)) {
+        if (addedToCache) {
+            if (binTypes(Excludes::ALL).contains(resource.type)) {
                 // Remove old style cache image if it exists
                 if (QFile::exists(cacheFile + ".png")) {
                     QFile::remove(cacheFile + ".png");
                 }
             }
+            // add record to cache index
             resources.append(resource);
         } else {
             printf("\033[1;33mWarning! Couldn't add resource to cache. Have "
@@ -2027,43 +2091,55 @@ void Cache::fillBlanks(GameEntry &entry, const QString scraper) {
         QByteArray data;
         if (fillType(type, matchingResources, result, source)) {
             QFile f(cacheDir.path() + "/" + result);
-            if (f.open(QIODevice::ReadOnly)) {
+            if (type != "video" && f.open(QIODevice::ReadOnly)) {
+                // don't read any video data into RAM
                 data = f.readAll();
                 f.close();
             }
+            QFileInfo info(f);
             if (type == "cover") {
                 entry.coverData = data;
                 entry.coverSrc = source;
+                // failsafe when not defined in artwork.xml for all image data
+                // and for ES-DE (applies to all entry.*file)
+                entry.coverFile = info.absoluteFilePath();
             } else if (type == "screenshot") {
                 entry.screenshotData = data;
                 entry.screenshotSrc = source;
+                entry.screenshotFile = info.absoluteFilePath();
             } else if (type == "wheel") {
                 entry.wheelData = data;
                 entry.wheelSrc = source;
+                entry.wheelFile = info.absoluteFilePath();
             } else if (type == "marquee") {
                 entry.marqueeData = data;
                 entry.marqueeSrc = source;
+                entry.marqueeFile = info.absoluteFilePath();
             } else if (type == "texture") {
                 entry.textureData = data;
                 entry.textureSrc = source;
-            } else if (type == "video" && !data.isEmpty()) {
-                // video, manual and fanrt are not part of artwork.xml resp.
-                // compositor.cpp: set filename here
-                entry.videoData = data;
+                entry.textureFile = info.absoluteFilePath();
+            } else if (type == "video" && !source.isEmpty()) {
+                // video, manual and fanart, aso. are never part of artwork.xml
+                // resp. compositor.cpp, thus: set filename here
+                entry.videoSize = info.size();
+                // some bogus data to match later conditions
+                entry.videoData.append(0x17).append(0x2a);
                 entry.videoSrc = source;
-                QFileInfo info(f);
                 entry.videoFormat = info.suffix();
                 entry.videoFile = info.absoluteFilePath();
             } else if (type == "manual" && !data.isEmpty()) {
                 entry.manualData = data;
                 entry.manualSrc = source;
-                QFileInfo info(f);
                 entry.manualFile = info.absoluteFilePath();
             } else if (type == "fanart" && !data.isEmpty()) {
                 entry.fanartData = data;
                 entry.fanartSrc = source;
-                QFileInfo info(f);
                 entry.fanartFile = info.absoluteFilePath();
+            } else if (type == "backcover" && !data.isEmpty()) {
+                entry.backcoverData = data;
+                entry.backcoverSrc = source;
+                entry.backcoverFile = info.absoluteFilePath();
             }
             // PENDING: if thumbnail is ever used, add it here like video/manual
         }

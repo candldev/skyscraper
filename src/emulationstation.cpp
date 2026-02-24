@@ -25,8 +25,8 @@
 
 #include "emulationstation.h"
 
-#include "config.h"
 #include "gameentry.h"
+#include "pathtools.h"
 #include "strtools.h"
 #include "xmlreader.h"
 
@@ -43,6 +43,9 @@ EmulationStation::EmulationStation() {}
 void EmulationStation::setConfig(Settings *config) {
     this->config = config;
     if (config->scraper == "cache") {
+        /* TODO: explicitly set flags manuals false when "enable-manuals" is not
+         * set ? or remove extra option gameListVariants and use --flags
+         * manuals? */
         if (config->gameListVariants.contains("enable-manuals"))
             config->manuals = true;
         if (config->gameListVariants.contains("enable-fanart"))
@@ -257,7 +260,7 @@ void EmulationStation::assembleList(QString &finalOutput,
         preserveFromOld(entry);
 
         if (config->relativePaths) {
-            entry.path = "./" + Config::lexicallyRelativePath(
+            entry.path = "./" + PathTools::lexicallyRelativePath(
                                     config->inputFolder, entry.path);
         }
         finalOutput.append(createXml(entry));
@@ -341,7 +344,8 @@ QString EmulationStation::createXml(GameEntry &entry) {
     l.append(elem(GameEntry::getTag(GameEntry::Elem::RATING), entry.rating,
                   addEmptyElem));
     l.append(elem(GameEntry::getTag(GameEntry::Elem::DESCRIPTION),
-                  entry.description, addEmptyElem));
+                  StrTools::shortenText(entry.description, config->maxLength),
+                  addEmptyElem));
 
     QString released = entry.releaseDate;
     QRegularExpressionMatch m = isoTimeRe().match(released);
@@ -397,12 +401,12 @@ QString EmulationStation::elem(const QString &elem, const QString &data,
                 // fp is always different from inputFolder
                 // it is save to add "./" as it will always return sth relative
                 fp = "./" +
-                     Config::lexicallyRelativePath(config->inputFolder, fp);
+                     PathTools::lexicallyRelativePath(config->inputFolder, fp);
             } else {
                 // edge case when unattendSkip=true and a new game is added to
                 // an existing gamelist with relative paths and relativePaths
                 // has been changed from also true to false in the same run
-                fp = Config::lexicallyNormalPath(fp);
+                fp = PathTools::lexicallyNormalPath(fp);
             }
         }
         fp = StrTools::xmlEscape(fp);
@@ -437,6 +441,10 @@ QStringList EmulationStation::createEsVariantXml(const GameEntry &entry) {
     if (!entry.fanartSrc.isEmpty() && config->fanart) {
         l.append(elem(GameEntry::getTag(GameEntry::Elem::FANART),
                       entry.fanartFile, false, true));
+    }
+    if (!entry.backcoverSrc.isEmpty() && config->backcovers) {
+        l.append(elem(GameEntry::getTag(GameEntry::Elem::BACKCOVER),
+                      entry.backcoverFile, false, true));
     }
     return l;
 }
@@ -481,10 +489,31 @@ QString EmulationStation::getVideosFolder() {
 }
 
 QString EmulationStation::getManualsFolder() {
+    // ES variants and ES-DE
     return config->mediaFolder % "/manuals";
 }
 
 QString EmulationStation::getFanartsFolder() {
-    /* for ES variants */
-    return config->mediaFolder % "/fanarts";
+    // ES variants, use same folder (singular) as ES-DE
+    return config->mediaFolder % "/fanart";
 }
+
+QString EmulationStation::getBackcoversFolder() {
+    // ES variants and ES-DE
+    return config->mediaFolder % "/backcovers";
+}
+
+GameEntry::Types EmulationStation::supportedMedia() {
+    // RetroPie ES baseline
+    GameEntry::Types t =
+        GameEntry::Types(GameEntry::MARQUEE | GameEntry::SCREENSHOT |
+                         GameEntry::VIDEO | GameEntry::WHEEL);
+    // ES variants
+    if (config->manuals)
+        t |= GameEntry::MANUAL;
+    if (config->fanart)
+        t |= GameEntry::FANART;
+    if (config->backcovers)
+        t |= GameEntry::BACKCOVER;
+    return t;
+};

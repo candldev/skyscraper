@@ -25,9 +25,9 @@
 
 #include "attractmode.h"
 
-#include "config.h"
 #include "gameentry.h"
 #include "nametools.h"
+#include "pathtools.h"
 #include "strtools.h"
 
 #include <QDate>
@@ -196,8 +196,10 @@ void AttractMode::assembleList(QString &finalOutput,
             QFile descFile(descDir.absolutePath() % "/" % entry.baseName %
                            ".txt");
             if (descFile.open(QIODevice::WriteOnly)) {
-                descFile.write(entry.description.trimmed().toUtf8().left(
-                    config->maxLength));
+                descFile.write(
+                    StrTools::shortenText(entry.description.trimmed(),
+                                          config->maxLength)
+                        .toUtf8());
                 descFile.close();
             }
         }
@@ -209,7 +211,9 @@ void AttractMode::checkReqs() {
     if (config->frontendExtra.isEmpty()) {
         printf("Frontend 'attractmode' requires emulator set with '-e'. Check "
                "'--help' for more information.\n");
-        exit(0);
+        emit die(
+            1, "incomplete configuration",
+            "Frontend 'attractmode' requires '-e' or 'emulator=' to be set");
     }
     if (!config->frontendExtra.contains(".cfg")) {
         config->frontendExtra.append(".cfg");
@@ -228,19 +232,21 @@ void AttractMode::checkReqs() {
 
     printf("Looking for emulator cfg file:\n");
 
-    if (checkEmulatorFile(config->frontendExtra)) {
-        return;
-    }
-
     // For RetroPie this is linked directly to
     // /opt/retropie/configs/all/attractmode/emulators/
-    if (checkEmulatorFile(QDir::homePath() % "/.attract/emulators/" +
-                          config->frontendExtra)) {
+    QString altEmuFn =
+        QDir::homePath() % "/.attract/emulators/" % config->frontendExtra;
+    if (checkEmulatorFile(config->frontendExtra) ||
+        checkEmulatorFile(altEmuFn)) {
         return;
     }
 
     printf("Couldn't locate emulator cfg file, exiting...\n");
-    exit(1);
+    emit die(1,
+             QString("can neither access '%1' nor '%2")
+                 .arg(config->frontendExtra)
+                 .arg(altEmuFn),
+             "Files do not exist");
 }
 
 bool AttractMode::checkEmulatorFile(QString fileName) {
@@ -308,7 +314,7 @@ QString AttractMode::getVideosFolder() {
         mediaTypeFolder = getMediaTypeFolder("snap", true);
     }
     if (mediaTypeFolder.isEmpty()) {
-        mediaTypeFolder = Config::concatPath(config->mediaFolder, type);
+        mediaTypeFolder = PathTools::concatPath(config->mediaFolder, type);
     }
     return mediaTypeFolder;
 }
@@ -351,7 +357,7 @@ QString AttractMode::getMediaTypeFolder(QString type, bool detectVideoPath) {
     }
 
     if (type != "video" && mediaTypeFolder.isEmpty()) {
-        mediaTypeFolder = Config::concatPath(config->mediaFolder, type);
+        mediaTypeFolder = PathTools::concatPath(config->mediaFolder, type);
     }
 
     return mediaTypeFolder;

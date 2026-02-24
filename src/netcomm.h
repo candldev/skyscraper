@@ -35,19 +35,23 @@ class NetComm : public QObject {
     Q_OBJECT
 
 public:
-    NetComm(QSharedPointer<NetManager> manager);
+    NetComm(QSharedPointer<NetManager> manager, int timeout = 30 /* secs */);
+
     void request(QString query, QString postData = QString(),
                  QList<QPair<QString, QString>> headers =
                      QList<QPair<QString, QString>>());
     QByteArray getData();
     QNetworkReply::NetworkError getError(const int &verbosity = 0);
+    bool ok() { return error == QNetworkReply::NoError; };
+    int getHttpStatus() { return httpStatus; };
     QByteArray getContentType();
     QByteArray getRedirUrl();
     QString getHeaderValue(const QString headerKey);
+    void setTimeout(int secs);
 
 private slots:
     void replyReady();
-    void dataDownloaded(qint64 bytesReceived, qint64);
+    void dataDownloaded(qint64 bytesReceived, qint64 /* bytesTotal */);
     void requestTimeout();
 
 signals:
@@ -60,8 +64,10 @@ private:
     QNetworkReply::NetworkError error;
     QByteArray contentType;
     QByteArray redirUrl;
+    int httpStatus;
     QNetworkReply *reply;
     QList<QNetworkReply::RawHeaderPair> headerPairs;
+    int timeout;
 };
 
 #endif // NETCOMM_H

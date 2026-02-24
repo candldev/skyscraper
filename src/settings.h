@@ -42,7 +42,6 @@ struct Settings {
     QString currentDir = "";
 
     QString cacheFolder = "";
-    QString gameListFileString = "";
     QString skippedFileString = "";
     QString configFile = "";
     QString frontend = "";
@@ -68,6 +67,7 @@ struct Settings {
     QString videosFolder = "";
     QString manualsFolder = "";
     QString fanartsFolder = "";
+    QString backcoversFolder = "";
     QString importFolder = "";
     QString nameTemplate = "";
     int doneThreads = 0;
@@ -99,6 +99,9 @@ struct Settings {
     bool skipped = false;
     bool tidyDesc = true;
     bool ignoreYearInFilename = false;
+    // in use for the cache commands possible without providing a platform
+    bool inputFolderNotMain = false;
+    bool cacheFolderNotMain = false;
     QString artworkConfig = "";
     QByteArray artworkXml = "";
     QString excludePattern = "";
@@ -120,6 +123,7 @@ struct Settings {
 
     bool manuals = false;
     bool fanart = false;
+    bool backcovers = false;
     QString gameListVariants = "";
     bool videos = false;
     bool videoPreferNormalized = true;
@@ -142,7 +146,9 @@ struct Settings {
     bool cacheTextures = true;
     bool skipExistingManuals = false;
     bool skipExistingFanart = false;
+    bool skipExistingBackcovers = false;
     bool miximages = false;
+    bool stdErr = false; // for AbstractScraper slot
 
     QString innerBracketsReplace = "";
     QString innerParenthesesReplace = "";
@@ -182,17 +188,23 @@ public:
 
     bool validateFrontend(const QString &providedFrontend);
 
+signals:
+    void die(const int &, const QString &, const QString &);
+
 private:
     void setFlag(const QString flag);
     QSet<QString> getKeys(CfgType type);
     QStringList parseFlags();
     void reportInvalidPlatform();
     bool validateFileParameter(const QString &param, QString &val);
+    bool validatePurgeParameters(QString &purgeParam);
+    bool validateCacheSubCommand(const QString &subcommand);
     bool scraperAllowedForMatch(const QString &providedScraper,
                                 const QString &opt);
     QString toAbsolutePath(bool isCliOpt, QString optionVal);
     QString parseExtensions(const QString &optionVal);
     QString getAllExtensionsOfPlatform();
+    void outOfRange(QString &k, int v, const QString &section);
 
     Settings *config;
     const QCommandLineParser *parser;
@@ -202,6 +214,7 @@ private:
         {"addExtensions",           QPair<QString, int>("str",  CfgType::MAIN | CfgType::PLATFORM                                        )},
         {"addFolders",              QPair<QString, int>("bool",                                     CfgType::FRONTEND                    )},
         {"artworkXml",              QPair<QString, int>("str",  CfgType::MAIN | CfgType::PLATFORM | CfgType::FRONTEND                    )},
+        {"backcovers",              QPair<QString, int>("bool", CfgType::MAIN                                                            )},
         {"brackets",                QPair<QString, int>("bool", CfgType::MAIN | CfgType::PLATFORM | CfgType::FRONTEND                    )},
         {"cacheCovers",             QPair<QString, int>("bool", CfgType::MAIN | CfgType::PLATFORM |                     CfgType::SCRAPER )},
         {"cacheFolder",             QPair<QString, int>("str",  CfgType::MAIN | CfgType::PLATFORM                                        )},

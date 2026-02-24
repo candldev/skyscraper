@@ -27,6 +27,7 @@
 
 #include "config.h"
 #include "crc32.h"
+#include "pathtools.h"
 #include "platform.h"
 #include "strtools.h"
 
@@ -36,18 +37,31 @@
 #include <QProcess>
 #include <QRegularExpression>
 
-constexpr int RETRIESMAX = 4;
+constexpr int RETRIESMAX = 3;
+constexpr int TIMEOUT_SEC = 75;
+constexpr int DELAY_NOTE_AFTER_SEC = 15;
+
 constexpr int MINARTSIZE = 256;
 
 ScreenScraper::ScreenScraper(Settings *config,
                              QSharedPointer<NetManager> manager)
-    : AbstractScraper(config, manager, MatchType::MATCH_ONE) {
+    : AbstractScraper(config, manager, MatchType::MATCH_ONE, TIMEOUT_SEC) {
     connect(&limitTimer, &QTimer::timeout, &limiter, &QEventLoop::quit);
     limitTimer.setInterval(
         1200); // 1.2 second request limit set a bit above 1.0 as requested by
                // the good folks at ScreenScraper. Don't change!
     limitTimer.setSingleShot(false);
     limitTimer.start();
+
+    connect(&statusTimer, &QTimer::timeout, this, [=]() {
+        tctr = tctr + 1;
+        if (tctr >= DELAY_NOTE_AFTER_SEC) {
+            printf(" \033[1;32m%2s\033[0mResponse delayed for "
+                   "%ds\r",
+                   tctr % 2 ? " •" : "• ", 5 * ((int)(tctr / 5)));
+            fflush(stdout);
+        }
+    });
 
     baseUrl = "http://www.screenscraper.fr";
 
@@ -67,6 +81,7 @@ ScreenScraper::ScreenScraper(Settings *config,
     fetchOrder.append(GameEntry::Elem::VIDEO);
     fetchOrder.append(GameEntry::Elem::MANUAL);
     fetchOrder.append(GameEntry::Elem::FANART);
+    fetchOrder.append(GameEntry::Elem::BACKCOVER);
 }
 
 void ScreenScraper::getSearchResults(QList<GameEntry> &gameEntries,
@@ -92,36 +107,48 @@ void ScreenScraper::getSearchResults(QList<GameEntry> &gameEntries,
         (platformId == -1 ? "" : "&systemeid=" + QString::number(platformId)) +
         "&output=json&" + searchName;
 
+    tctr = 0;
+    statusTimer.start(1000);
+
     for (int retries = 0; retries < RETRIESMAX; ++retries) {
         limiter.exec();
         netComm->request(gameUrl);
         q.exec();
         data = netComm->getData();
 
-        QByteArray headerData =
-            data.left(1024); // Minor optimization with minimal more RAM usage
+        // Minor optimization with minimal more RAM usage
+        QByteArray headerData = data.left(1024);
         // Do error checks on headerData. It's more stable than checking the
         // potentially faulty JSON
         if (headerData.isEmpty()) {
-            printf("\033[1;33mRetrying request...\033[0m\n\n");
+            int timeout = TIMEOUT_SEC << (1 + retries);
+            printf(
+                "\033[1;33mRetrying request with timeout of %ds...\033[0m\n\n",
+                timeout);
+            netComm->setTimeout(timeout);
+            tctr = 0;
             continue;
         } else if (headerData.contains("non trouvée")) {
+            statusTimer.stop();
             return;
         } else if (headerData.contains("API totalement fermé")) {
             printf("\033[1;31mThe ScreenScraper API is currently closed, "
                    "exiting nicely...\033[0m\n\n");
+            statusTimer.stop();
             reqRemaining = 0;
             return;
         } else if (headerData.contains(
                        "Le logiciel de scrape utilisé a été blacklisté")) {
             printf("\033[1;31mSkyscraper has apparently been blacklisted at "
                    "ScreenScraper, exiting nicely...\033[0m\n\n");
+            statusTimer.stop();
             reqRemaining = 0;
             return;
         } else if (headerData.contains("Votre quota de scrape est")) {
             printf("\033[1;31mYour daily ScreenScraper request limit has been "
                    "reached, exiting nicely...\033[0m\n\n");
             reqRemaining = 0;
+            statusTimer.stop();
             return;
         } else if (
             headerData.contains("API fermé pour les non membres") ||
@@ -145,11 +172,17 @@ void ScreenScraper::getSearchResults(QList<GameEntry> &gameEntries,
                 Config::getSkyFolder().toStdString().c_str());
             if (retries == RETRIESMAX - 1) {
                 reqRemaining = 0;
+                statusTimer.stop();
                 return;
             } else {
                 continue;
             }
         }
+
+        if (tctr >= DELAY_NOTE_AFTER_SEC) {
+            printf("Response after %ds           \n", tctr);
+        }
+        statusTimer.stop();
 
         // Fix faulty JSON that is sometimes received back from ScreenScraper
         data.replace("],\n\t\t}", "]\n\t\t}");
@@ -167,9 +200,9 @@ void ScreenScraper::getSearchResults(QList<GameEntry> &gameEntries,
                                            "191;167;200;198;192;228;169;156"),
                          "****");
             data.replace(config->password.toUtf8(), "****");
-            QFile errorResponse(
-                Config::getSkyFolder(Config::SkyFolderType::LOG) +
-                "/screenscraper_error.txt");
+            QString errFile = Config::getSkyFolder(Config::SkyFolderType::LOG) %
+                              "/screenscraper_error.txt";
+            QFile errorResponse(errFile);
             if (errorResponse.open(QIODevice::WriteOnly)) {
                 if (data.length() > 64) {
                     if (data.startsWith("****I****l**** "
@@ -180,16 +213,12 @@ void ScreenScraper::getSearchResults(QList<GameEntry> &gameEntries,
                             "\nEN: Mandatory fields are missing in the URL.\n");
                     }
                     errorResponse.write(data);
-                    printf("The erroneous answer was written to "
-                           "'%s'. "
-                           "If this file contains game data, please consider "
-                           "filing a bug report at "
+                    printf("The erroneous answer was written to '%s'. If you "
+                           "expected to scrape game data and this error "
+                           "persists, please consider filing a bug report at "
                            "'https://github.com/Gemba/skyscraper/issues' and "
                            "attach that file.\n",
-                           QFileInfo(errorResponse)
-                               .absoluteFilePath()
-                               .toStdString()
-                               .c_str());
+                           PathTools::pathToCStr(errFile));
                 }
                 errorResponse.close();
             }
@@ -415,6 +444,17 @@ void ScreenScraper::getCover(GameEntry &game) {
     game.coverData = downloadImageWithRetry(url);
 }
 
+void ScreenScraper::getBackcover(GameEntry &game) {
+    QString url = "";
+    url = getJsonText(jsonObj["medias"].toArray(), REGION,
+                      QList<QString>({"box-2D-back"}));
+    game.backcoverData = downloadImageWithRetry(url);
+    if (game.backcoverData.size() < 20480) {
+        /* 20KiB, rare case of trash image */
+        game.backcoverData.clear();
+    }
+}
+
 void ScreenScraper::getScreenshot(GameEntry &game) {
     QString url = getJsonText(jsonObj["medias"].toArray(), REGION,
                               QList<QString>({"ss", "sstitle"}));
@@ -550,15 +590,18 @@ QList<QString> ScreenScraper::getSearchNames(const QFileInfo &info,
     if (!unpack) {
         // For normal file reading
         QFile romFile(info.absoluteFilePath());
-        romFile.open(QIODevice::ReadOnly);
-        while (!romFile.atEnd()) {
+        if (romFile.open(QIODevice::ReadOnly)) {
+            while (!romFile.atEnd()) {
 
-            QByteArray dataSeg = romFile.read(1024);
-            md5.addData(dataSeg);
-            sha1.addData(dataSeg);
-            crc.pushData(1, dataSeg.data(), dataSeg.length());
+                QByteArray dataSeg = romFile.read(1024);
+                md5.addData(dataSeg);
+                sha1.addData(dataSeg);
+                crc.pushData(1, dataSeg.data(), dataSeg.length());
+            }
+            romFile.close();
+        } else {
+            qWarning() << "Romfile not readable" << info.absoluteFilePath();
         }
-        romFile.close();
     }
 
     QString crcResult = QString::number(crc.releaseInstance(1), 16);

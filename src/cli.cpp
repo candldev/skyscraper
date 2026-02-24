@@ -254,7 +254,11 @@ void Cli::createParser(QCommandLineParser *parser, QString platforms) {
     QCommandLineOption buildinfoOption("buildinfo",
                                        "Show Skyscraper's build information "
                                        "(for reporting an issue) and quit.");
+    QCommandLineOption stderrOption("stderr",
+                                    "If Skyscraper could not proceed, print "
+                                    "a one-line error message to stderr.");
 
+    // order alphabetically, per character: long options before short option
     parser->addOption(addextOption);
     parser->addOption(aOption);
     parser->addOption(buildinfoOption);
@@ -262,19 +266,20 @@ void Cli::createParser(QCommandLineParser *parser, QString platforms) {
     parser->addOption(cOption);
     parser->addOption(dOption);
     parser->addOption(endatOption);
-    parser->addOption(eOption);
     parser->addOption(excludefromOption);
     parser->addOption(excludepatternOption);
+    parser->addOption(eOption);
     parser->addOption(flagsOption);
     parser->addOption(fOption);
-    parser->addOption(gOption);
     parser->addOption(gamelistfilenameOption);
+    parser->addOption(gOption);
     parser->addHelpOption();
     parser->addOption(hintOption);
     parser->addOption(includefromOption);
     parser->addOption(includepatternOption);
     parser->addOption(iOption);
     parser->addOption(langOption);
+    parser->addOption(listExt);
     parser->addOption(lOption);
     parser->addOption(maxfailsOption);
     parser->addOption(mOption);
@@ -285,9 +290,9 @@ void Cli::createParser(QCommandLineParser *parser, QString platforms) {
     parser->addOption(regionOption);
     parser->addOption(searchStemOption);
     parser->addOption(searchStemAllOption);
-    parser->addOption(listExt);
-    parser->addOption(sOption);
     parser->addOption(startatOption);
+    parser->addOption(stderrOption);
+    parser->addOption(sOption);
     parser->addOption(tOption);
     parser->addOption(uOption);
     parser->addOption(verbosityOption);
@@ -304,8 +309,9 @@ void Cli::subCommandUsage(const QString subCmd) {
                "following is a list of valid flags\nand what they do.\n");
     }
 
-    printf("\nShowing '\033[1;33m--%s ...\033[0m' help:\n\n",
-           subCmd.toUtf8().constData());
+    printf("\nShowing '\033[1;33m--%s%s...\033[0m' help:\n\n",
+           subCmd.toUtf8().constData(),
+           subCmd == "cache report:missing=" ? "" : " ");
 
     QMap<QString, QString> subOptions;
     subOptions = getSubCommandOpts(subCmd);
@@ -349,7 +355,8 @@ QMap<QString, QString> Cli::getSubCommandOpts(const QString subCmd) {
             {"show", "Prints a status of all cached resources for the selected "
                      "platform."},
             {"validate",
-             "Checks the consistency of the cache for the selected platform."},
+             "Checks the consistency of the cache for the selected platform. "
+             "If platform is omitted it validates over all platforms."},
             {"edit",
              "Let's you edit resources for the selected platform for all files "
              "or a range of files. Add a filename on command line to edit "
@@ -365,27 +372,30 @@ QMap<QString, QString> Cli::getSubCommandOpts(const QString subCmd) {
              "roms."},
             {"vacuum",
              "Compares your romset to any cached resource and removes the "
-             "resources that you no longer have roms for."},
+             "resources that you no longer have roms for. If no platform is "
+             "given every platform cache is vacuumed."},
             {"report:missing=<OPTION>",
              "Generates reports with all files that are missing the "
              "specified resources. Check '--cache report:missing=help' "
-             "for more info."},
+             "for more info. When no platform is given, then reports for all "
+             "platforms are created."},
             {"merge:<PATH>",
              "Merges two resource caches together. It will merge the resource "
              "cache specified by <PATH> into the local resource cache by "
              "default. To merge into a non-default destination cache folder "
              "set it with '-d <PATH>'. Both should point to folders with the "
              "'db.xml' inside."},
-            {"purge:all",
-             "Removes ALL cached resources for the selected platform."},
+            {"purge:all", "Removes ALL cached resources for the selected "
+                          "platform. Attn.: If no platform is given with -p, "
+                          "cache data or EVERY platform will be deleted!"},
             {"purge:m=<MODULE>,t=<TYPE>",
              "Removes cached resources related to the selected module(m) and / "
              "or type(t). Either one can be left out in which case ALL "
              "resources from the selected module or ALL resources rom the "
              "selected type will be removed."},
             {"refresh", "Forces a refresh of existing cached resources for any "
-                        "scraping module. Requires a scraping module set with "
-                        "'-s'. Similar to '--refresh'."},
+                        "scraping module. Equal to '--refresh'. Requires a "
+                        "scraping module set with '-s'."},
         };
     } else if (subCmd == "flags") {
         m = {
@@ -437,10 +447,13 @@ QMap<QString, QString> Cli::getSubCommandOpts(const QString subCmd) {
              "When generating gamelists, skip processing covers that already "
              "exist in the media output folder."},
             {"skipexistingmanuals",
-             "When generating gamelists, skip processing manuals that already "
+             "When generating gamelists, don't copy manuals that already "
+             "exist in the media output folder."},
+            {"skipexistingbackcovers",
+             "When generating gamelists, don't copy backcovers that already "
              "exist in the media output folder."},
             {"skipexistingfanarts",
-             "When generating gamelists, skip processing of fanart that "
+             "When generating gamelists, don't copy fanart that "
              "already exist in the media output folder."},
             {"skipexistingmarquees",
              "When generating gamelists, skip processing marquees that already "
@@ -452,7 +465,7 @@ QMap<QString, QString> Cli::getSubCommandOpts(const QString subCmd) {
              "When generating gamelists, skip processing textures, covers, "
              "disc art that already exist in the media output folder."},
             {"skipexistingvideos",
-             "When generating gamelists, skip copying videos that already "
+             "When generating gamelists, don't copy videos that already "
              "exist in the media output folder."},
             {"skipexistingwheels",
              "When generating gamelists, skip processing wheels that already "
@@ -481,15 +494,23 @@ QMap<QString, QString> Cli::getSubCommandOpts(const QString subCmd) {
              "'screenscraper' scraping module."},
             {"videos",
              "Enables scraping and caching of videos for the scraping modules "
-             "that support them. Beware, this takes up a lot of disk space!"},
+             "that support them. When set during gamelist creation it outputs "
+             "videos for the frontend. Beware, this takes up a lot of disk "
+             "space!"},
             {"manuals",
              "Enables scraping and caching of manuals for the scraping modules "
-             "that support them."},
+             "that support them. No need to set for gamelist creation, unless "
+             "for some ES variants."},
             {"fanarts",
              "Enables scraping and caching of fanart for the scraping modules "
-             "that support them."},
-            {"miximages",
-             "Enables output of Skyscraper's artwork as ES-DE miximage."},
+             "that support them. No need to set for gamelist creation, unless "
+             "for some ES variants."},
+            {"backcovers",
+             "Enables scraping and caching of backcovers for the scraping "
+             "modules that support them. No need to set for gamelist creation, "
+             "unless for some ES variants."},
+            {"miximages", "Enables output of Skyscraper's artwork as ES-DE "
+                          "miximage. Only applicable to ES-DE frontend."},
         };
     } else {
         QStringList resTypes = Cache::getAllResourceTypes();
@@ -536,8 +557,9 @@ void Cli::showHint() {
 #ifdef Q_OS_LINUX
     hint = hint.replace(QDir::homePath(), "~");
 #endif
-    hint = "\033[1;33mDID YOU KNOW:\033[0m " + hint;
+    hint = "\033[1;33mDID YOU KNOW\033[0m: " + hint;
 
+    // TODO: put into StrTools
     QStringList hintWrapped;
     int ptr = 0;
     QString line;

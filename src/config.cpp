@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include "platform.h"
+#include "skyscraper.h"
 
 #include <QDebug>
 #include <QDir>
@@ -66,7 +67,10 @@ void Config::initSkyFolders() {
                 printf("Couldn't create folder '%s'. Please check permissions, "
                        "now exiting...\n",
                        d.absolutePath().toStdString().c_str());
-                exit(1);
+                emit die(1,
+                         QString("cannot create directory '%1'")
+                             .arg(d.absolutePath()),
+                         "Permission denied");
             }
         }
     }
@@ -105,7 +109,8 @@ void Config::copyFile(const QString &src, const QString &dest, bool isPristine,
         printf("\033[1;31mSource config file not found '%s'. Please check "
                "setup, bailing out...\033[0m\n",
                src.toStdString().c_str());
-        exit(1);
+        emit die(1, QString("cannot access '%1'").arg(src),
+                 "File does not exist");
     }
 
     if (QFileInfo::exists(dest)) {
@@ -113,19 +118,25 @@ void Config::copyFile(const QString &src, const QString &dest, bool isPristine,
             if (isPristine && (src.endsWith("peas.json") ||
                                src.endsWith("platforms_idmap.csv"))) {
                 // remove possible destination *.dist file
-                QFile::remove(dest % ".dist");
-                qDebug() << (dest % ".dist") << "removed as prisitine" << dest
-                         << "detected";
+                if (QFile::remove(dest % ".dist")) {
+                    qDebug() << (dest % ".dist") << "removed as prisitine"
+                             << dest << "detected";
+                }
             }
-            QFile::remove(dest);
-            QFile::copy(src, dest);
-            qDebug() << "Overwritten file" << dest
-                     << "with newer or same version";
+            if (QFileInfo(src).size() != QFileInfo(dest).size()) {
+                QFile::remove(dest);
+                QFile::copy(src, dest);
+                qDebug() << "Overwritten file" << dest
+                         << "bc. file size differed";
+            }
         } else if (fileOp == FileOp::CREATE_DIST) {
-            QString d = QString(dest + ".dist");
-            QFile::remove(d);
-            QFile::copy(src, d);
-            qDebug() << "Copied original distribution file" << src << "as" << d;
+            QString distfn = QString(dest + ".dist");
+            if (QFileInfo(src).size() != QFileInfo(distfn).size()) {
+                QFile::remove(distfn);
+                QFile::copy(src, distfn);
+                qDebug() << "Copied original distribution file" << src << "as"
+                         << distfn;
+            }
         }
     } else {
         QFile::copy(src, dest);
@@ -140,7 +151,10 @@ void Config::setupUserConfig() {
             printf("Couldn't create folder '%s'. Please check permissions, "
                    "now exiting...\n",
                    skyDir.absolutePath().toStdString().c_str());
-            exit(1);
+            emit die(1,
+                     QString("cannot create directory '%1'")
+                         .arg(skyDir.absolutePath()),
+                     "Permission denied");
         }
     }
 
@@ -174,7 +188,8 @@ void Config::setupUserConfig() {
                "and\n%s\nPlease remove one or the other to avoid "
                "confusion.\033[0m\n",
                manualInst.toStdString().c_str(), rpInst.toStdString().c_str());
-        exit(1);
+        emit die(1, "duplicate installation files detected",
+                 "Confused Skyscraper problem");
     }
 
     // copy configs
@@ -228,13 +243,13 @@ void Config::setupUserConfig() {
         }
     }
 
-    QString localEtcPath = QString(PREFIX "/etc/skyscraper/");
+    QString localEtcPath = QString(SYSCONFDIR "/skyscraper/");
     if (!QFileInfo::exists(localEtcPath) || isRpInstall) {
         // RetroPie or Windows installation type: handled externally
         return;
     }
 
-    bool isPristine;
+    int isPristine;
     for (auto src : configFiles.keys()) {
         QString dest = configFiles.value(src).first;
         isPristine = false;
@@ -253,8 +268,16 @@ void Config::setupUserConfig() {
             dest = dest.replace("resources/", "");
         } else if ((src == "peas.json" || src == "platforms_idmap.csv")) {
             isPristine = isPlatformCfgPristine(tgtDir % "/" % dest);
-            if (isPristine) {
+            // isPristine == 1: keep new file in *.dist
+            if (isPristine == 0) {
                 configFiles[src].second = FileOp::OVERWRITE;
+            } else if (isPristine < 0) {
+                printf("\033[1;31mFile '%s' does not exist or cannot be read. "
+                       "Please fix. Quitting.\033[0m\n",
+                       (tgtDir % "/" % dest).toUtf8().constData());
+                emit die(1,
+                         QString("cannot access '%1'").arg(tgtDir % "/" % dest),
+                         "File does not exist or no permission");
             }
         }
         QString tgt = tgtDir % "/" % dest;
@@ -263,11 +286,11 @@ void Config::setupUserConfig() {
     }
 }
 
-bool Config::isPlatformCfgPristine(QString platformCfgFilePath) {
+int Config::isPlatformCfgPristine(QString platformCfgFilePath) {
 
-    bool isPristine =
+    int isPristine =
         Platform::get().isPlatformCfgfilePristine(platformCfgFilePath);
-    if (!isPristine) {
+    if (isPristine == 1) {
         printf("\033[1;33mLooks like '%s' has local changes.\nPlease "
                "transfer local changes to another file to mute this "
                "warning.\nSee topic 'Transferring Local Platform Changes' "
@@ -294,7 +317,9 @@ void Config::checkLegacyFiles() {
 
 QString Config::getSupportedPlatforms() {
     if (!Platform::get().loadConfig()) {
-        exit(1);
+        emit die(1, "cannot parse platform configuration",
+                 "Platform configuration files (peas*.json / "
+                 "platforms_idmap*.csv) missing or erroneous");
     }
 
     QString platforms;
@@ -318,63 +343,4 @@ QString Config::getRetropieVersion() {
         rpVer.close();
     }
     return ver;
-}
-
-QString Config::concatPath(QString path, QString subPath) {
-    if (!subPath.isEmpty()) {
-        while (subPath.left(1) == "/")
-            subPath.remove(0, 1);
-    }
-    if (!path.isEmpty()) {
-        while (path.right(1) == "/")
-            path.chop(1);
-    }
-    if (subPath == "." || subPath.isEmpty())
-        return path;
-    if (!path.isEmpty() && path.right(1) != "/") {
-        return path % "/" % subPath;
-    }
-    return path % subPath;
-}
-
-QString Config::makeAbsolutePath(const QString &prePath, QString subPath) {
-    if (subPath.isEmpty())
-        return subPath;
-
-    Q_ASSERT(QFileInfo(prePath).isAbsolute());
-
-    if (QFileInfo(subPath).isAbsolute() || subPath.startsWith("~/"))
-        return subPath;
-
-    if (subPath.startsWith("../"))
-        return concatPath(prePath, subPath);
-
-    if (subPath.startsWith("./"))
-        subPath.remove(0, 1);
-
-    return concatPath(prePath, subPath);
-}
-
-QString Config::lexicallyRelativePath(const QString &base,
-                                      const QString &other) {
-    std::filesystem::path result = std::filesystem::path(other.toStdString())
-                                       .lexically_relative(base.toStdString());
-    return QString(result.string().c_str());
-}
-
-QString Config::lexicallyNormalPath(const QString &pathWithDots) {
-    // not using QFileInfo::canonicalFilePath() as it would resolve symlinks
-    // which is not wanted
-    std::filesystem::path result =
-        std::filesystem::path(pathWithDots.toStdString()).lexically_normal();
-    return QString(result.string().c_str());
-}
-
-QString &Config::expandHomePath(QString &path) {
-    if (path.startsWith("~/")) {
-        path.remove(0, 1);
-        path = QDir::homePath() % path;
-        // "~account/folder" not supported
-    }
-    return path;
 }

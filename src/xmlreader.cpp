@@ -24,8 +24,8 @@
  */
 #include "xmlreader.h"
 
-#include "config.h"
 #include "gameentry.h"
+#include "pathtools.h"
 
 #include <QDebug>
 #include <QFile>
@@ -79,47 +79,51 @@ void XmlReader::addEntries(const QDomNodeList &nodes,
         GameEntry entry;
         const QDomNode node = nodes.at(a);
 
-        entry.path = Config::makeAbsolutePath(
+        entry.path = PathTools::makeAbsolutePath(
             inputFolder, node.firstChildElement("path").text());
 
         addTextual(entry, node);
 
-        entry.coverFile = Config::makeAbsolutePath(
+        entry.coverFile = PathTools::makeAbsolutePath(
             /* inputFolder is correct here as ES reads/expects relative media
                filepath in relation to the inputFolder */
             inputFolder,
             node.firstChildElement(GameEntry::getTag(GameEntry::Elem::COVER))
                 .text());
 
-        entry.screenshotFile = Config::makeAbsolutePath(
+        entry.screenshotFile = PathTools::makeAbsolutePath(
             inputFolder, node.firstChildElement(
                                  GameEntry::getTag(GameEntry::Elem::SCREENSHOT))
                              .text());
-        entry.marqueeFile = Config::makeAbsolutePath(
+        entry.marqueeFile = PathTools::makeAbsolutePath(
             inputFolder,
             node.firstChildElement(GameEntry::getTag(GameEntry::Elem::MARQUEE))
                 .text());
-        entry.textureFile = Config::makeAbsolutePath(
+        entry.textureFile = PathTools::makeAbsolutePath(
             inputFolder,
             node.firstChildElement(GameEntry::getTag(GameEntry::Elem::TEXTURE))
                 .text());
-        entry.videoFile = Config::makeAbsolutePath(
+        entry.videoFile = PathTools::makeAbsolutePath(
             inputFolder,
             node.firstChildElement(GameEntry::getTag(GameEntry::Elem::VIDEO))
                 .text());
         if (!entry.videoFile.isEmpty()) {
             entry.videoFormat = "fromxml";
         }
-        entry.manualFile = Config::makeAbsolutePath(
+        entry.manualFile = PathTools::makeAbsolutePath(
             inputFolder,
             node.firstChildElement(GameEntry::getTag(GameEntry::Elem::MANUAL))
                 .text());
 
+        entry.fanartFile = PathTools::makeAbsolutePath(
+            inputFolder,
+            node.firstChildElement(GameEntry::getTag(GameEntry::Elem::FANART))
+                .text());
+        entry.backcoverFile = PathTools::makeAbsolutePath(
+            inputFolder, node.firstChildElement(
+                                 GameEntry::getTag(GameEntry::Elem::BACKCOVER))
+                             .text());
         if (!gamelistExtraTags.isEmpty()) {
-            entry.fanartFile = Config::makeAbsolutePath(
-                inputFolder, node.firstChildElement(
-                                     GameEntry::getTag(GameEntry::Elem::FANART))
-                                 .text());
             // preserve these elements for ES and ES-DE
             for (const auto &t : gamelistExtraTags) {
                 entry.setEsExtra(t, node.firstChildElement(t).text());
@@ -139,7 +143,7 @@ void XmlReader::addEntries(const QDomNodeList &nodes,
             for (int i = 0; i < elems.length(); i++) {
                 QDomElement glElem = elems.at(i).toElement();
                 QString k = glElem.tagName();
-                if (entry.commonGamelistElems(true).values().contains(k) ||
+                if (entry.commonGamelistElems().values().contains(k) ||
                     k == "path" ||
                     k == "sortname" /* when reading a non-batocera GL */) {
                     // it is a common/baseline gamelist element: do not keep in

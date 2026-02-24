@@ -47,6 +47,7 @@ protected:
 
 private:
     QTimer limitTimer;
+    QTimer statusTimer;
     QEventLoop limiter;
     QList<QString> getSearchNames(const QFileInfo &info,
                                   QString &debug) override;
@@ -70,6 +71,7 @@ private:
     void getVideo(GameEntry &game) override;
     void getManual(GameEntry &game) override;
     void getFanart(GameEntry &game) override;
+    void getBackcover(GameEntry &game) override;
 
     QString getJsonText(QJsonArray array, int attr,
                         QList<QString> types = QList<QString>());
@@ -90,6 +92,8 @@ private:
     QString region;
     QString lang;
     QJsonObject jsonObj;
+    int timeout;
+    int tctr = 0;
 };
 
 #endif // SCREENSCRAPER_H

@@ -45,7 +45,7 @@ public:
     enum MatchType { ABSTRACT, MATCH_ONE, MATCH_MANY };
 
     AbstractScraper(Settings *config, QSharedPointer<NetManager> manager,
-                    MatchType type = ABSTRACT);
+                    MatchType type = ABSTRACT, int timeout = 30 /* secs */);
     virtual ~AbstractScraper();
     virtual void getGameData(GameEntry &game);
     virtual QList<QString> getSearchNames(const QFileInfo &info,
@@ -54,13 +54,21 @@ public:
     virtual void runPasses(QList<GameEntry> &gameEntries, const QFileInfo &info,
                            QString &output, QString &debug);
 
-    int reqRemaining = -1;
+    QString lookupAliasMap(const QString &baseName, QString &debug);
     MatchType getType() const { return type; };
+
+    int reqRemaining = -1;
 
 #ifdef TESTING
     QList<QString> getRegionPrios() { return regionPrios; }
     void detectRegionFromFilename(const QFileInfo &info);
 #endif
+
+signals:
+    void die(const int &, const QString &, const QString &);
+
+public slots:
+    void bury(const int &, const QString &, const QString &);
 
 protected:
     Settings *config;
@@ -83,8 +91,10 @@ protected:
     virtual void getTexture(GameEntry &game);
     virtual void getTitle(GameEntry &);
     virtual void getVideo(GameEntry &game);
+    // sparse scraper support
     virtual void getManual(GameEntry &game) { (void)game; };
     virtual void getFanart(GameEntry &game) { (void)game; };
+    virtual void getBackcover(GameEntry &game) { (void)game; };
 
     virtual void nomNom(const QString nom, bool including = true);
     bool checkNom(const QString nom);
@@ -96,7 +106,6 @@ protected:
 
     QString lookupSearchName(const QFileInfo &info, const QString &baseName,
                              QString &debug);
-    QString lookupAliasMap(const QString &baseName, QString &debug);
     QByteArray downloadMedia(const QString &url, bool isImage = true);
     QVariantMap readJson(const QString &filename);
 

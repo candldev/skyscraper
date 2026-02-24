@@ -73,6 +73,7 @@ This is an alphabetical index of all configuration options their usage level and
 | [addExtensions](CONFIGINI.md#addextensions)                 | Advanced       |    Y     |       Y        |                |               |
 | [addFolders](CONFIGINI.md#addfolders)                       | Expert         |          |                |       Y        |               |
 | [artworkXml](CONFIGINI.md#artworkxml)                       | Advanced       |    Y     |       Y        |       Y        |               |
+| [backcovers](CONFIGINI.md#backcovers)                       | Basic          |    Y     |                |                |               |
 | [brackets](CONFIGINI.md#brackets)                           | Basic          |    Y     |       Y        |       Y        |               |
 | [cacheCovers](CONFIGINI.md#cachecovers)                     | Basic          |    Y     |       Y        |                |       Y       |
 | [cacheFolder](CONFIGINI.md#cachefolder)                     | Basic          |    Y     |       Y        |                |               |
@@ -148,7 +149,7 @@ This is an alphabetical index of all configuration options their usage level and
 
 Sets the rom input folder. By default Skyscraper will look for roms in the `/home/<USER>/RetroPie/roms/<PLATFORM>` folder. If your roms are located in a non-default location, you can set the input path using this option.
 
-!!! note
+!!! note "Path Appended With `<PLATFORM>`"
 
     If this is set in the `[main]` or `[<FRONTEND>]` section it will automatically add `/<PLATFORM>` to the end of the path. If you want better control consider adding it to a `[<PLATFORM>]` section instead where it will be used as is.
 
@@ -156,6 +157,13 @@ Default value: `/home/<USER>/RetroPie/roms/<PLATFORM>`
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`
 
 The default is valid for the most frontends, very few [frontends](FRONTENDS.md) do use a different default value.
+
+!!! tip "Usage in `[<FRONTEND>]` Section"
+
+    When you use this option in a `[<FRONTEND>]` section other than
+    the default `emulationstation`, then it is only evaluated when you provide
+    either `-f` command line parameter or have set the [`frontend`](#frontend)
+    option during a scraping run. 
 
 ---
 
@@ -163,7 +171,7 @@ The default is valid for the most frontends, very few [frontends](FRONTENDS.md) 
 
 Sets the game list export folder. By default Skyscraper exports the game list to the same directory as the rom input folder. This enables you to change that to a non-default location.
 
-!!! note
+!!! note "Path Appended With `<PLATFORM>`"
 
     If this is set in the `[main]` or `[<FRONTEND>]` section it will automatically add `/<PLATFORM>` to the end of the path. If you want better control consider adding it to a `[<PLATFORM>]` section instead where it will be used as is.
 
@@ -171,6 +179,13 @@ Default value: `/home/<USER>/RetroPie/roms/<PLATFORM>`
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`
 
 The default is valid for the most frontends, very few [frontends](FRONTENDS.md) do use a different default value.
+
+!!! tip "Usage in `[<FRONTEND>]` Section"
+
+    When you use this option in a `[<FRONTEND>]` section other than
+    the default `emulationstation`, then it is only evaluated when you provide
+    either `-f` command line parameter or have set the [`frontend`](#frontend)
+    option during a scraping run. 
 
 ---
 
@@ -198,7 +213,7 @@ Sets the artwork / media output folder. By default (ie. if the option `mediaFold
 
 Read more about the [artwork compositing](ARTWORK.md).
 
-!!! note
+!!! note "Path Appended With `<PLATFORM>`"
 
     If this is set in the `[main]` or `[<FRONTEND>]` section it will automatically add `/<PLATFORM>` to the end of the path. If you want better control consider adding it to a `[<PLATFORM>]` section instead where it will be used as is.
 
@@ -206,6 +221,13 @@ Default value: `/home/<USER>/RetroPie/roms/<PLATFORM>/media`
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`
 
 The default is valid for the most frontends, very few [frontends](FRONTENDS.md) do use a different default value.
+
+!!! tip "Usage in `[<FRONTEND>]` Section"
+
+    When you use this option in a `[<FRONTEND>]` section other than
+    the default `emulationstation`, then it is only evaluated when you provide
+    either `-f` command line parameter or have set the [`frontend`](#frontend)
+    option during a scraping run. 
 
 ---
 
@@ -425,7 +447,7 @@ Allowed in sections: `[main]`
 This option is _only_ applicable when also setting the `frontend="attractmode"` option. It sets the _emulator_ to be used when generating the `attractmode` game list. On RetroPie the emulator name is mostly the same as the platform.
 
 Default value: unset  
-Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`
+Allowed in sections: `[main]`, `[<PLATFORM>]` and frontend `[attractmode]`
 
 ---
 
@@ -616,7 +638,7 @@ Allowed in sections: `[main]`, `[<PLATFORM>]`
 
 #### maxLength
 
-Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500.
+Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500 (approx. two-thirds of a typewriter page). Allowed range is 0 to 10000 characters. A truncated text will end with [...] (Ellipsis). The text is only truncated in the gamelist/frontend output. The cache will hold the full text.
 
 Default value: `2500`  
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`, `[<SCRAPER>]`
@@ -634,7 +656,7 @@ Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<SCRAPER>]`
 
 #### threads
 
-Sets the desired number of parallel threads to be run when scraping. Some modules have maximum allowed threads. If you set this higher than the allowed value, it will be auto-adjusted. By default it is set to 4.
+Sets the desired number of parallel threads to be run when scraping or creating the gamelist. Some modules have maximum allowed threads. If you set this higher than the allowed value, it will be auto-adjusted. By default it is set to 4. You can not set this higher than the [ideal thread count](https://doc.qt.io/qt-6/qthread.html#idealThreadCount), which is usually the output of `nproc` on your Linux system.
 
 Default value: `4`  
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<SCRAPER>]`
@@ -890,7 +912,7 @@ Adds the rom extensions to the ones that are already supported by the platform, 
 
     If you feel like you are using a file extension that ought to be supported by default, please report it so it can be added in a later version of Skyscraper.
 
-Default value: `*.zip *.7z *.ml` (if and only if `extensions` parameter is unset)  
+Default value: `*.ml *.m3u *.zip *.7z` (if and only if `extensions` parameter is unset)  
 Allowed in sections: `[main]`, `[<PLATFORM>]`
 
 ---
@@ -1034,6 +1056,13 @@ or
 userCreds="<Client-ID>:<Client-Secret>"
 ```
 
+or
+
+```ini
+[thegamesdb]
+userCreds="<your-private-api-key-of-64chars>"
+```
+
 Default value: unset  
 Allowed in sections: `[<SCRAPER>]`
 
@@ -1098,6 +1127,23 @@ Allowed in sections: Only for frontends `[emulationstation]`, `[esde]` or `[retr
 
 ---
 
+#### backcovers
+
+By default Skyscraper doesn't scrape and cache game backcover resources because
+not all scraping sites provide this data and also only some frontends support
+the display of the cover backside. If enabled Skyscraper will collect game
+manuals for the scraping modules that provide this data. For the frontends ES-DE
+and Batocera no further option must be set to enable the output of the boxback
+in the gamelist and into the appropriate folder during gamelist creation.
+You may want to review and [adjust the cache
+priorities](CACHE.md#resource-and-scraping-module-priorities) for the fanart
+selection when data from several scraping modules is present in your cache.
+
+Default value: false  
+Allowed in sections: `[main]`
+
+---
+
 #### fanarts
 
 By default Skyscraper doesn't scrape and cache game fanart resources because not
@@ -1107,10 +1153,13 @@ modules that provide this data. For the frontends ES-DE and Batocera no further
 option must be set to enable the output of fanart in the gamelist and into the
 appropriate folder during gamelist creation. For other EmulationStation forks
 where themes support the display of fanart, see also option
-[gameListVariants](CONFIGINI.md#gamelistvariants).
+[gameListVariants](CONFIGINI.md#gamelistvariants).  
+You may want to review and [adjust the cache
+priorities](CACHE.md#resource-and-scraping-module-priorities) for the fanart
+selection when data from several scraping modules is present in your cache.
 
 Default value: false  
-Allowed in sections: `[main]`, `[<PLATFORM>]`
+Allowed in sections: `[main]`
 
 ---
 
@@ -1124,6 +1173,9 @@ and Batocera no further option must be set to enable the output of the PDF
 manuals to the appropriate folder during gamelist creation. For other
 EmulationStation forks which support PDF manual display, see also option
 [gameListVariants](CONFIGINI.md#gamelistvariants).
+You may want to review and [adjust the cache
+priorities](CACHE.md#resource-and-scraping-module-priorities) for the fanart
+selection when data from several scraping modules is present in your cache.
 
 Default value: false  
 Allowed in sections: `[main]`, `[<PLATFORM>]`

@@ -9,10 +9,12 @@
     },
     "3ds": {
         "aliases": [
-            "nintendo 3ds"
+            "nintendo 3ds",
+            "n3ds"
         ],
         "formats": [
-            "*.3ds"
+            "*.3ds",
+            "*.cci"
         ]
     },
     "actionmax": {
@@ -52,11 +54,11 @@
             "*.cue",
             "*.dms",
             "*.hdf",
+            "*.hdz",
             "*.img",
             "*.ipf",
             "*.iso",
             "*.lha",
-            "*.m3u",
             "*.rp9",
             "*.uae"
         ]
@@ -71,7 +73,6 @@
             "*.cpc",
             "*.cpr",
             "*.dsk",
-            "*.m3u",
             "*.tap"
         ]
     },
@@ -296,7 +297,6 @@
             "*.ctr",
             "*.img",
             "*.ipf",
-            "*.m3u",
             "*.raw",
             "*.rom",
             "*.st",
@@ -366,6 +366,24 @@
             "*.dat"
         ]
     },
+    "bbcmicro": {
+        "aliases": [
+            "Acorn BBC Micro",
+            "Acorn BBC Microcomputer System",
+            "BBC Micro",
+            "BBC Microcomputer System"
+        ],
+        "formats": [
+            "*.adf",
+            "*.adl",
+            "*.csw",
+            "*.dsd",
+            "*.fdi",
+            "*.img",
+            "*.ssd",
+            "*.uef"
+        ]
+    },
     "c128": {
         "aliases": [
             "commodore 128",
@@ -396,7 +414,6 @@
             "*.d80",
             "*.d81",
             "*.g64",
-            "*.m3u",
             "*.prg",
             "*.t64",
             "*.tap",
@@ -469,6 +486,7 @@
         "formats": [
             "*.asc",
             "*.bas",
+            "*.bin",
             "*.cas",
             "*.ccc",
             "*.dmk",
@@ -517,6 +535,7 @@
         "formats": [
             "*.asc",
             "*.bas",
+            "*.bin",
             "*.cas",
             "*.ccc",
             "*.dmk",
@@ -538,8 +557,7 @@
             "*.chd",
             "*.cue",
             "*.gdi",
-            "*.iso",
-            "*.m3u"
+            "*.iso"
         ]
     },
     "easyrpg": {
@@ -742,7 +760,6 @@
             "*.gcm",
             "*.gcz",
             "*.iso",
-            "*.m3u",
             "*.rvz"
         ]
     },
@@ -1139,7 +1156,6 @@
             "*.cas",
             "*.col",
             "*.dsk",
-            "*.m3u",
             "*.mx1",
             "*.mx2",
             "*.rom"
@@ -1390,7 +1406,6 @@
             "*.img",
             "*.ins",
             "*.iso",
-            "*.m3u",
             "*.m3u8",
             "*.sh",
             "*.vhd"
@@ -1405,7 +1420,6 @@
             "*.88d",
             "*.cmt",
             "*.d88",
-            "*.m3u",
             "*.t88"
         ]
     },
@@ -1566,7 +1580,6 @@
         "formats": [
             "*.bin",
             "*.iso",
-            "*.m3u",
             "*.pkg"
         ]
     },
@@ -1622,7 +1635,6 @@
             "*.cue",
             "*.img",
             "*.iso",
-            "*.m3u",
             "*.mdf",
             "*.pbp",
             "*.toc",
@@ -1659,7 +1671,6 @@
             "*.chd",
             "*.cue",
             "*.iso",
-            "*.m3u",
             "*.mdf"
         ]
     },
@@ -1711,8 +1722,7 @@
         "formats": [
             "*.chd",
             "*.cue",
-            "*.iso",
-            "*.m3u"
+            "*.iso"
         ]
     },
     "sg-1000": {
@@ -1899,7 +1909,6 @@
             "*.gcm",
             "*.gcz",
             "*.iso",
-            "*.m3u",
             "*.rvz",
             "*.wad",
             "*.wbfs"
@@ -1962,7 +1971,6 @@
             "*.dim",
             "*.hdf",
             "*.hdm",
-            "*.m3u",
             "*.xdf"
         ]
     },
@@ -1978,8 +1986,7 @@
     "xbox360": {
         "aliases": [],
         "formats": [
-            "*.iso",
-            "*.m3u"
+            "*.iso"
         ]
     },
     "zmachine": {
