@@ -447,7 +447,7 @@ Allowed in sections: `[main]`
 This option is _only_ applicable when also setting the `frontend="attractmode"` option. It sets the _emulator_ to be used when generating the `attractmode` game list. On RetroPie the emulator name is mostly the same as the platform.
 
 Default value: unset  
-Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`
+Allowed in sections: `[main]`, `[<PLATFORM>]` and frontend `[attractmode]`
 
 ---
 
@@ -638,7 +638,7 @@ Allowed in sections: `[main]`, `[<PLATFORM>]`
 
 #### maxLength
 
-Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500.
+Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500 (approx. two-thirds of a typewriter page). Allowed range is 0 to 10000 characters. A truncated text will end with [...] (Ellipsis). The text is only truncated in the gamelist/frontend output. The cache will hold the full text.
 
 Default value: `2500`  
 Allowed in sections: `[main]`, `[<PLATFORM>]`, `[<FRONTEND>]`, `[<SCRAPER>]`
@@ -1054,6 +1054,13 @@ or
 ```ini
 [igdb]
 userCreds="<Client-ID>:<Client-Secret>"
+```
+
+or
+
+```ini
+[thegamesdb]
+userCreds="<your-private-api-key-of-64chars>"
 ```
 
 Default value: unset  

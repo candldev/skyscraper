@@ -96,7 +96,7 @@ I strongly recommend supporting them by contributing data to the database, or by
 - Website: _[www.thegamesdb.net](http://www.thegamesdb.net)_
 - Type: _File name search based_
 - User credential support: _Not required_
-- API request limit: _Limited to 3000 requests per IP per month_
+- API request limit: _Limited to 1000 requests per IP per month_
 - Thread limit: _None_
 - Platform support: _[Link to list](https://thegamesdb.net/list_platforms.php) or see `tgdb_platforms.json` sibling to your `config.ini`_
 - Media support: `backcover`, `cover`, `fanart`, `marquee`, `screenshot`, `wheel`
@@ -107,7 +107,7 @@ I strongly recommend supporting them by contributing data to the database, or by
 
 For newer games there's no way around TheGames DB. It recently had a huge redesign and their database remains one of the best out there. I would recommend scraping your roms with `screenscraper` first, and then use `thegamesdb` to fill out the gaps in your cache.
 
-There's a small caveat to this module, as it has a monthly request limit (see above) per IP per month. But this should be plenty for most people.
+There's a small caveat to this module, as it has a monthly request limit (see above) per IP per month. As per Feb 17th of 2026 TGDB have changed they API usage policy: You may have to register for your private API key to increase the above limits. Put your private API key then in the [`userCreds=`](CONFIGINI.md#usercreds) section of `[thegamesdb]`, or use the `-u` option when scraping with this module.
 
 Their API is based on a file name search. This means that the returned results do have a chance of being faulty. Skyscraper does a lot internally to make sure accepted data is for the correct game. But it is impossible to ensure 100% correct results, so do keep that in mind when using it. Consider using the `--flags interactive` command line flag if you want complete control of the accepted entries.
 
@@ -241,9 +241,13 @@ the [userCreds](CONFIGINI.md#usercreds) configuration (without any colon) in the
 - Example use:
   ```bash
   Skyscraper -p zxspectrum -s zxinfo
+  Skyscraper -p zxspectrum -s zxinfo --refresh --query="id=03012" ManicMiner.tzx
+  Skyscraper -p zxspectrum -s zxinfo --refresh --query="f55584f3a77b28f77145ac6e3925ff60" ManicMiner.tzx
   ```
 
-If you're looking specifically for ZX Spectrum data, this is the module to use. ZXInfo is probably the most complete ZX Spectrum resource and information database in existence. I strongly recommend visiting the site if you have any interest in these little machines. It's a cornucopia of information on the platform.
+If you're looking specifically for ZX Spectrum data, this is the module to use. ZXInfo is probably the most complete ZX Spectrum resource and information database in existence. I strongly recommend visiting the site if you have any interest in these little machines. It's a cornucopia of information on the platform.  
+This module always tries to match the file hash (SHA512) first, which will give you the most accurate match when you use well known ZX Spectrum game collections. If the file hash has no match the filename is used. As with ZX Spectrum there are often many fan made clones, you may hint Skyscraper to return the wanted match by adding the release year to either the filename or in the file `aliasMap.csv`, for example `Manic Miner (1983).tzx` as file or `ManicMiner;Manic Miner (1983)` in `aliasMap.csv` (aliasing the source file `ManicMiner.tzx` or `ManicMiner.tzx.zip`), also make sure to have the configuration option [`ignoreYearInFilename`](CONFIGINI.md#ignoreyearinfilename) set to `false` (which is the default).  
+If all else fails you can use the [`--query`](CLIHELP.md#--query-string) option for single games. If you use the query option no automatic file hash lookup is performed. Here you may either use `id=0...` (see [zxinfo.dk](https://zxinfo.dk) for the ID, it must start with at least one `0`, Skyscraper will pad with the remaining zeros to match the 7 digit format expected). Or you may use a specific MD5 / SHA512 hash to force exactly this game metadata to be scraped, use the hash directly as query value without any keyword.
 
 ### Custom Resource Import
 
@@ -305,7 +309,7 @@ Read the setup and config description of the [GameBase DB module](CONFIGINI.md#g
 - Media support: `backcover`, `cover`, `fanart`, `manual`, `marquee`, `screenshot`, `video`
 - Example use:
   ```bash
-  Skyscraper -p snes -s esgamelist
+  Skyscraper -p snes -s esgamelist --flags video
   Skyscraper -p megadrive -f batocera --refresh -s esgamelist
   Skyscraper -p c64 -f batocera -s esgamelist <game filename(s)>
   ```
@@ -316,8 +320,10 @@ into the Skyscraper cache. This is useful if you already have a lot of data and
 artwork in a `gamelist.xml` and associated media files and you wish to use it
 with Skyscraper. Usually this is a one-off scraper for each platform. If you
 want to re-import and overwrite already cached data from a previous run with
-this module, do set the `--refresh` flag. These mediatypes are implicitly set
-on: `backcover`, `fanart`, `manual` and `video`.  
+this module, do set the `--refresh` flag.  
+By default these mediatypes are not ingested: `backcover`, `fanart`, `manual`
+and `video`. If you want also these mediatypes to be ingested, then set them
+with `--flags` or the respective configuration file option.  
 For historical reasons the gamelist element marquee contains the logo (wheel).
 This scraper will use the marquee gamelist element and store it in the wheel
 cache media type, to ensure consistency when generating a gamelist from this

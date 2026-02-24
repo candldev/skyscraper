@@ -1,5 +1,5 @@
 TEMPLATE = app
-TARGET = test_config
+TARGET = test_pathtools
 DEPENDPATH += .
 INCLUDEPATH += ../../src
 CONFIG += debug
@@ -16,17 +16,22 @@ unix {
 }
 
 PREFIX = /usr/local
+SYSCONFDIR = $${PREFIX}/etc
 DEFINES+=PREFIX=\\\"$$PREFIX\\\"
+DEFINES+=SYSCONFDIR=\\\"$$SYSCONFDIR\\\"
 
 include(../../VERSION.ini)
 DEFINES+=VERSION=\\\"$$VERSION\\\"
 
-HEADERS += ../../src/config.h \
-            ../../src/platform.h \
-            ../../src/strtools.h
+HEADERS += \
+           ../../src/config.h \
+           ../../src/pathtools.h \
+           ../../src/platform.h \
+           ../../src/strtools.h
 
-SOURCES += test_config.cpp \
+SOURCES += test_pathtools.cpp \
            ../../src/config.cpp \
+           ../../src/pathtools.cpp \
            ../../src/platform.cpp \
            ../../src/strtools.cpp
 

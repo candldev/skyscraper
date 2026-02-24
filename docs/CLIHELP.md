@@ -130,7 +130,7 @@ Skyscraper -p snes -i "/path/to/your/snes/roms"
 
 ### -l &lt;0-10000&gt;
 
-Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500 (which is approx. two-thirds of a typewriter page). Consider setting this in [`config.ini`](CONFIGINI.md#maxlength) instead.
+Sets the maximum length of returned game descriptions. This is a convenience option if you feel like game descriptions are too long. By default it is set to 2500 (approx. two-thirds of a typewriter page). Consider setting this in [`config.ini`](CONFIGINI.md#maxlength) instead.
 
 **Example(s)**
 
@@ -284,23 +284,28 @@ This is a powerful option that allows you to purge the requested resources from 
 
 You can purge _all_ resources from the cache for the chosen platform using the keyword `all`.
 
-If no platform is specified, the `purge:all` operation will apply to all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in the config.ini file will be disregarded.
+If _no platform is specified_, then the `purge:all` operation will apply to all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in Skyscraper's configfile will be disregarded.
 
-You can purge specific resources from a certain module with `m=<MODULE>` or of a certain type with `t=<TYPE>` or a combination of the two separated by a `,`.
+You can purge specific resources from a certain module with `m=<MODULE>` or of a certain type with `t=<TYPE>` or a combination of the two separated by a comma. If both `m=` and `t=` are provided, then only resources are removed which match both criterias. See also examples below.
 
-Supported modules can be seen under `-s` when using the `--help` option. Supported types are: `title`, `platform`, `description`, `publisher`, `developer`, `ages`, `tags`, `rating`, `releasedate`, `cover`, `screenshot`, `wheel`, `marquee`, `video`.
+Supported _modules_ (scraping sources) can be seen under `-s` when using the `--help` option. Supported textual _types_ are: `title`, `platform`, `description`, `publisher`, `developer`, `ages`, `tags`, `rating`, and `releasedate`. Supported media _types_ are: `cover`, `screenshot`, `wheel`, `marquee`, `video`, `manual`, `fanart` and `backcover`.
 
-!!! danger "Possible dangerous command"
+!!! danger "Possible dangerous commands"
 
     Purging anything from the cache cannot be undone, so please consider making a backup.
 
 **Example(s)**
 
 ```
+# Purge all cached data for platform snes
 Skyscraper -p snes --cache purge:all
+# Purge all data from thegamesdb source for platform snes
 Skyscraper -p snes --cache purge:m=thegamesdb
-Skyscraper -p snes --cache purge:t=cover
-Skyscraper -p snes --cache purge:m=thegamesdb,t=cover
+# Purge all covers from any scraping source for platform switch
+Skyscraper -p switch --cache purge:t=cover
+# Purge all covers from source thegamesdb for platform psx
+Skyscraper -p psx --cache purge:m=thegamesdb,t=cover
+# Here be dragons: Zap your cache for all platforms!
 Skyscraper --cache purge:all
 ```
 
@@ -328,7 +333,7 @@ You can use any of the following:
 
 Supported resource types are: `title`, `platform`, `description`, `publisher`, `developer`, `ages`, `tags`, `rating`, `releasedate`, `cover`, `screenshot`, `wheel`, `marquee`, `video`.
 
-If no platform is specified, reports will be generated for all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in the config.ini file will be disregarded.
+If _no platform is specified_, reports will be generated for all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in Skyscraper's configfile will be disregarded, especially any settings or commandline parameters for [`addExtensions`](CONFIGINI.md#addextensions) or [`extensions`](CONFIGINI.md#extensions).
 
 !!! tip
 
@@ -357,7 +362,7 @@ Skyscraper -p snes --cache show
 
 You can purge all resources that don't have any connection to your current romset for the selected platform by using the `vacuum` command. This is extremely useful if you've removed a bunch of roms from your collection and you wish to purge any cached data you don't need anymore.
 
-If no platform is specified, the vacuum operation will apply to all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in the config.ini file will be disregarded.
+If no platform is specified, the vacuum operation will apply to all existing platforms stored in the cache. In this scenario, any platform-specific configurations defined in Skyscraper's configfile will be disregarded, especially any settings or commandline parameters for [`addExtensions`](CONFIGINI.md#addextensions) or [`extensions`](CONFIGINI.md#extensions).
 
 !!! danger "Possible dangerous command"
 
@@ -840,6 +845,32 @@ If you wish to work on a subset of your roms you can use this option to set the 
 ```
 Skyscraper -p snes --cache edit --startat "rom name.zip"
 Skyscraper -p snes -s thegamesdb --startat "relative/path/to/rom name.zip"
+```
+
+### --stderr
+
+Prints a brief one-liner on `stderr` when Skyscraper ran into an error and exits with a non-zero return value. This is mainly useful when you call Skyscraper from another program. If you combine it with a redirect of `stdout` to `/dev/null` you can mute the general Skyscraper output. The format of the one-liner is: `Skyscraper: <cause>: <effect>`, thus it can be easily parsed by the calling program. Additionally, an exit code of 2 means some CLI parameter is wrong, an exit code of 1 is used by Skyscraper to signal other error conditions (with a `config.ini` setting or during runtime).
+
+**Example(s)**
+
+Try these in contrast to see the difference in output:
+
+```bash
+# Force an error condition.
+$ Skyscraper -p dontexist
+[...]
+$ Skyscraper --stderr -p dontexist
+[...]
+$ Skyscraper --stderr -p dontexist > /dev/null
+Skyscraper: ambigous platform parameter: Platform parameter missing or unknown platform provided
+$ echo $?        # returns 2 as platform is not valid
+
+# Assume input folder ~/RetroPie/roms/bbcmicro does not yet exist.
+# However, platform name is valid.
+```bash
+$ Skyscraper --stderr -p bbcmicro > /dev/null
+Skyscraper: cannot access '/home/pi/RetroPie/roms/bbcmicro': No such directory
+$ echo $?        # returns 1 as platform is valid but the input folder does not exist
 ```
 
 ### --verbosity &lt;0-3&gt;

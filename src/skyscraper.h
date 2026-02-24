@@ -50,18 +50,29 @@ public:
     QSharedPointer<NetManager> manager;
     enum OpMode { SINGLE, NO_INTR, CACHE_EDIT, CACHE_EDIT_DISMISS, THREADED };
     int state = SINGLE;
+    bool stdErr = false;
 
     void loadConfig(const QCommandLineParser &parser);
-    const inline QString getPlatformFileExtensions() {
-        return Platform::get().getFormats(config.platform, config.extensions,
-                                          config.addExtensions);
+    const inline QString getPlatformFileExtensions(QString platform = "") {
+        QString exts;
+        if (platform.isEmpty()) {
+            exts = Platform::get().getFormats(
+                config.platform, config.extensions, config.addExtensions);
+        } else {
+            // ignore extension variations (for cache ALL operations)
+            exts = Platform::get().getFormats(config.platform, "", "");
+        }
+        return exts;
     }
-
-public slots:
-    void run();
 
 signals:
     void finished();
+    void die(const int &, const QString &, const QString &);
+
+public slots:
+    void run();
+    void bury(const int &returnCode, const QString &effect,
+              const QString &cause);
 
 private slots:
     void entryReady(const GameEntry &entry, const QString &output,
@@ -113,8 +124,8 @@ private:
     int avgCompleteness;
     int currentFile;
     int totalFiles;
-    bool cacheScrapeMode;  // config.scraper == "cache"
-    bool generateGamelist; // cacheScrapeMode && pretend == false
+    bool cacheScrapeMode;  // set iff: config.scraper == "cache"
+    bool generateGamelist; // set iff: cacheScrapeMode && pretend == false
 };
 
 #endif // SKYSCRAPER_H

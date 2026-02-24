@@ -56,12 +56,13 @@ private:
     void getFanart(GameEntry &game) override;
     void getBackcover(GameEntry &game) override;
     QVector<int> getPlatformId(const QString platform) override;
+    QString getKey();
 
     QString gfxUrl;
     QJsonDocument jsonDoc;
     QJsonObject jsonObj;
 
-    void loadMaps();
+    bool loadMaps();
     QVariantMap platformMap;
     QVariantMap genreMap;
     QVariantMap developerMap;

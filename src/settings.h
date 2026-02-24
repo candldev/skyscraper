@@ -99,6 +99,9 @@ struct Settings {
     bool skipped = false;
     bool tidyDesc = true;
     bool ignoreYearInFilename = false;
+    // in use for the cache commands possible without providing a platform
+    bool inputFolderNotMain = false;
+    bool cacheFolderNotMain = false;
     QString artworkConfig = "";
     QByteArray artworkXml = "";
     QString excludePattern = "";
@@ -145,6 +148,7 @@ struct Settings {
     bool skipExistingFanart = false;
     bool skipExistingBackcovers = false;
     bool miximages = false;
+    bool stdErr = false; // for AbstractScraper slot
 
     QString innerBracketsReplace = "";
     QString innerParenthesesReplace = "";
@@ -184,18 +188,23 @@ public:
 
     bool validateFrontend(const QString &providedFrontend);
 
+signals:
+    void die(const int &, const QString &, const QString &);
+
 private:
     void setFlag(const QString flag);
     QSet<QString> getKeys(CfgType type);
     QStringList parseFlags();
     void reportInvalidPlatform();
     bool validateFileParameter(const QString &param, QString &val);
+    bool validatePurgeParameters(QString &purgeParam);
+    bool validateCacheSubCommand(const QString &subcommand);
     bool scraperAllowedForMatch(const QString &providedScraper,
                                 const QString &opt);
     QString toAbsolutePath(bool isCliOpt, QString optionVal);
     QString parseExtensions(const QString &optionVal);
     QString getAllExtensionsOfPlatform();
-    void outOfRange(QString &k, int v);
+    void outOfRange(QString &k, int v, const QString &section);
 
     Settings *config;
     const QCommandLineParser *parser;

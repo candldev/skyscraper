@@ -25,8 +25,8 @@
 
 #include "pegasus.h"
 
-#include "config.h"
 #include "nametools.h"
+#include "pathtools.h"
 #include "strtools.h"
 
 #include <QDate>
@@ -132,7 +132,7 @@ bool Pegasus::loadOldGameList(const QString &gameListFileString) {
 
 QString Pegasus::makeAbsolute(const QString &filePath,
                               const QString &inputFolder) {
-    return Config::makeAbsolutePath(inputFolder, QString(filePath));
+    return PathTools::makeAbsolutePath(inputFolder, QString(filePath));
 }
 
 void Pegasus::skipExisting(QList<GameEntry> &gameEntries,
@@ -272,8 +272,8 @@ void Pegasus::assembleList(QString &finalOutput,
         out.append(toPegasusFormat("game", entry.title));
 
         if (useRelPath) {
-            entry.path = Config::lexicallyRelativePath(config->gameListFolder,
-                                                       entry.path);
+            entry.path = PathTools::lexicallyRelativePath(
+                config->gameListFolder, entry.path);
         }
 
         out.append(toPegasusFormat("file", entry.path));
@@ -284,7 +284,8 @@ void Pegasus::assembleList(QString &finalOutput,
                 QString::number((int)(entry.rating.toDouble() * 100)) % "%"));
         }
         if (!entry.description.isEmpty()) {
-            QString desc = entry.description.left(config->maxLength);
+            QString desc =
+                StrTools::shortenText(entry.description, config->maxLength);
             replaceColon(desc, entry.title);
             out.append(toPegasusFormat("description", desc));
         }
@@ -342,7 +343,7 @@ QString Pegasus::addMediaFile(const QString &asset, bool useRelativePath,
                               QString mediaFile) {
     if (useRelativePath) {
         mediaFile =
-            Config::lexicallyRelativePath(config->gameListFolder, mediaFile);
+            PathTools::lexicallyRelativePath(config->gameListFolder, mediaFile);
     }
     return toPegasusFormat(asset, mediaFile);
 }
@@ -365,13 +366,14 @@ void Pegasus::replaceColon(QString &value, const QString &gameTitle) {
         // PENDING: use sliced() instead of mid() when Qt5
         // is no longer supported (ie. RetroPie moved away from Buster)
         ctxStr = ctxStr % value.mid(begin, end - begin) % endStr;
-        value.replace(idx, 1, ".");
-        qWarning() << QString(
-                          "Description of '%1' contains a colon (:) at '%2', "
-                          "Skyscraper replaced it with '.'. Consider "
-                          "editing the description to remediate this warning.")
-                          .arg(gameTitle)
-                          .arg(ctxStr);
+        const QChar modColon = QChar(0xa789);
+        value.replace(idx, 1, modColon);
+        qInfo() << QString("Description of '%1' contains a colon (:) at '%2', "
+                           "Skyscraper replaced it with '%3' (UTF-8 Modified "
+                           "Letter Colon).")
+                       .arg(gameTitle)
+                       .arg(ctxStr)
+                       .arg(modColon);
         idx = value.indexOf(':');
     }
 }

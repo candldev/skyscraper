@@ -25,35 +25,36 @@
 
 #include "esgamelist.h"
 
-#include "config.h"
 #include "gameentry.h"
 #include "nametools.h"
+#include "pathtools.h"
 
 ESGameList::ESGameList(Settings *config, QSharedPointer<NetManager> manager)
     : AbstractScraper(config, manager, MatchType::MATCH_ONE) {
     QDomDocument xmlDoc;
-    QFile gameListFile(
-        Config::concatPath(config->gameListFolder, config->gameListFilename));
+    QFile gameListFile(PathTools::concatPath(config->gameListFolder,
+                                             config->gameListFilename));
     if (gameListFile.open(QIODevice::ReadOnly)) {
         xmlDoc.setContent(&gameListFile);
         gameListFile.close();
         games = xmlDoc.elementsByTagName("game");
     }
-    // force true for esgamelist
-    config->fanart = true;
-    config->manuals = true;
-    config->videos = true;
-    config->backcovers = true;
 }
 
 void ESGameList::getSearchResults(QList<GameEntry> &gameEntries,
                                   QString searchName, QString platform) {
     if (games.isEmpty()) {
         if (!gameListFile.exists()) {
-            printf("\033[1;31mGamelist file not found '%s'. Now "
-                   "quitting...\033[0m\n",
-                   gameListFile.fileName().toStdString().c_str());
-            exit(1);
+            printf(
+                "\033[1;31mGamelist file '%s' not found for platform '%s'. Now "
+                "quitting...\033[0m\n",
+                config->gameListFilename.toStdString().c_str(),
+                config->platform.toStdString().c_str());
+            emit die(1,
+                     QString("cannot access gamelist '%1' for platform '%2'")
+                         .arg(config->gameListFilename)
+                         .arg(config->platform),
+                     "File does not exist");
         }
         printf("\033[1;33mGamelist file is empty '%s'. Continuing "
                "anyway.\033[0m\n",
@@ -92,7 +93,15 @@ void ESGameList::getGameData(GameEntry &game) {
     game.rating = getElementText(GameEntry::Elem::RATING);
     game.tags = getElementText(GameEntry::Elem::TAGS);
     game.description = getElementText(GameEntry::Elem::DESCRIPTION);
-
+    if (game.description.endsWith("[...]")) {
+        qWarning()
+            << QString(
+                   "Game title '%1' has shortened description '[...]' at %2 "
+                   "chars. Consider using a different source than esgamelist "
+                   "when the current maxLength setting is higher than %2.")
+                   .arg(game.title)
+                   .arg(game.description.length());
+    }
     if (config->cacheWheels) {
         // ES uses XML "marquee" but content is wheel (logo)
         game.wheelData =
@@ -143,7 +152,7 @@ void ESGameList::loadVideoData(GameEntry &game, const QString fileName) {
 
 QString ESGameList::getAbsoluteFileName(QString fileName) {
     /* paths in gamelist are relative to inputFolder for ES */
-    fileName = Config::makeAbsolutePath(config->inputFolder, fileName);
+    fileName = PathTools::makeAbsolutePath(config->inputFolder, fileName);
     if (QFileInfo::exists(fileName)) {
         return fileName;
     }
